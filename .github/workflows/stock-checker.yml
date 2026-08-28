@@ -3,6 +3,8 @@ name: ⚡ Super Fast Stock Checker
 on:
   # Sadece manuel tetikleme aktif - otomatik çalışma devre dışı
   workflow_dispatch:
+  schedule:
+    - cron: "2-59/5 * * * *"
 
 jobs:
   super-fast-stock-check:
