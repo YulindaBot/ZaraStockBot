@@ -1,20 +1,12 @@
 import json
+import os
 import time
 import subprocess
-import os
 import requests
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
-from webdriver_manager.chrome import ChromeDriverManager
-
-from scraperHelpers import (
-    check_stock_zara,
-    check_stock_bershka,
-    check_stock_stradivarius
-)
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 
 CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
@@ -22,8 +14,8 @@ CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
 
 def load_config():
     try:
-        with open(CONFIG_FILE, "r") as config_file:
-            return json.load(config_file)
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
         print(f"❌ Config load error: {e}")
         return None
@@ -31,35 +23,18 @@ def load_config():
 
 def save_config(config):
     try:
-        with open(CONFIG_FILE, "w") as config_file:
-            json.dump(
-                config,
-                config_file,
-                indent=2,
-                ensure_ascii=False
-            )
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
 
         if os.getenv("GITHUB_ACTIONS"):
             subprocess.run(
-                [
-                    "git",
-                    "config",
-                    "--global",
-                    "user.name",
-                    "Stock Checker Bot"
-                ],
+                ["git", "config", "--global", "user.name", "Stock Checker Bot"],
                 check=True,
                 capture_output=True
             )
 
             subprocess.run(
-                [
-                    "git",
-                    "config",
-                    "--global",
-                    "user.email",
-                    "actions@github.com"
-                ],
+                ["git", "config", "--global", "user.email", "actions@github.com"],
                 check=True,
                 capture_output=True
             )
@@ -77,12 +52,7 @@ def save_config(config):
 
             if result.returncode != 0:
                 subprocess.run(
-                    [
-                        "git",
-                        "commit",
-                        "-m",
-                        "Auto-remove found Zara item"
-                    ],
+                    ["git", "commit", "-m", "Auto-remove found Zara item"],
                     check=True,
                     capture_output=True
                 )
@@ -93,194 +63,322 @@ def save_config(config):
                     capture_output=True
                 )
 
+                print(f"✅ {CONFIG_FILE} updated in GitHub")
+
         return True
 
     except Exception as e:
-        print(f"❌ Config save error: {e}")
+        print(f"⚠️ Config save/push error: {e}")
         return False
 
 
-def remove_item_from_config(config, item_to_remove):
-    original_count = len(config.get("urls", []))
+def remove_item_from_config(config, item):
+    before = len(config.get("urls", []))
 
     config["urls"] = [
-        item
-        for item in config.get("urls", [])
-        if item["url"] != item_to_remove["url"]
+        x for x in config.get("urls", [])
+        if x.get("url") != item.get("url")
     ]
 
-    if len(config["urls"]) < original_count:
+    if len(config["urls"]) < before:
         return save_config(config)
 
     return False
 
 
-def setup_telegram():
+def telegram_setup():
     bot_api = os.getenv("BOT_API")
     chat_id = os.getenv("CHAT_ID")
-
-    return (
-        bool(bot_api and chat_id),
-        bot_api,
-        chat_id
-    )
+    return bot_api, chat_id
 
 
-def send_telegram_message(message, bot_api, chat_id):
+def send_telegram(message, bot_api, chat_id):
+    if not bot_api or not chat_id:
+        print("⚠️ Telegram credentials missing")
+        return
+
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{bot_api}/sendMessage",
             data={
                 "chat_id": chat_id,
                 "text": message,
-                "parse_mode": "HTML"
+                "parse_mode": "HTML",
+                "disable_web_page_preview": False
             },
-            timeout=8
+            timeout=10
         )
 
         response.raise_for_status()
-        return True
+        print("✅ Telegram sent")
 
     except Exception as e:
         print(f"❌ Telegram error: {e}")
-        return False
 
 
-def setup_chrome_driver():
-    chrome_options = Options()
-
-    chrome_options.page_load_strategy = "eager"
-
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-images")
-    chrome_options.add_argument("--disable-fonts")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-notifications")
-    chrome_options.add_argument("--disable-background-networking")
-    chrome_options.add_argument("--mute-audio")
-    chrome_options.add_argument("--window-size=1280,720")
-
-    try:
-        if os.path.exists("/usr/bin/chromedriver"):
-            service = Service("/usr/bin/chromedriver")
-        else:
-            service = Service(
-                ChromeDriverManager().install()
-            )
-
-        driver = webdriver.Chrome(
-            service=service,
-            options=chrome_options
-        )
-
-        driver.set_page_load_timeout(10)
-        driver.implicitly_wait(0)
-
-        return driver
-
-    except Exception as e:
-        print(f"❌ Chrome setup error: {e}")
-        return None
-
-
-def check_single_item(
-    driver,
-    item,
-    telegram_enabled,
-    bot_api,
-    chat_id,
-    config
-):
-    url = item.get("url")
-    store = item.get("store", "").lower()
-    sizes_to_check = item.get("sizes", [])
-    person = item.get("person", "Yulia")
-
-    print(
-        f"\n📋 Checking {store.upper()} "
-        f"| sizes: {', '.join(sizes_to_check)}"
+def normalize_size(text):
+    return (
+        text.replace("\n", " ")
+        .replace("\t", " ")
+        .strip()
+        .upper()
     )
 
+
+def check_zara(page, url, wanted_sizes):
+    print(f"🌐 Opening: {url}")
+
     try:
+        page.goto(
+            url,
+            wait_until="domcontentloaded",
+            timeout=15000
+        )
+    except PlaywrightTimeoutError:
+        print("⚠️ Page load timeout, continuing...")
+
+    # Allow Zara JS a moment to render the product controls.
+    page.wait_for_timeout(1200)
+
+    # Cookies
+    try:
+        cookie = page.locator("#onetrust-accept-btn-handler")
+
+        if cookie.count() > 0 and cookie.first.is_visible():
+            cookie.first.click(timeout=2000)
+            print("🍪 Cookies accepted")
+            page.wait_for_timeout(300)
+    except Exception:
+        pass
+
+    # Find ADD button using several methods.
+    add_selectors = [
+        "button[data-qa-action='add-to-cart']",
+        "[data-qa-action='add-to-cart']",
+        "button:has-text('Dodaj')",
+        "[role='button']:has-text('Dodaj')"
+    ]
+
+    add_button = None
+
+    for selector in add_selectors:
         try:
-            driver.get(url)
-        except TimeoutException:
-            print("⚡ Page timeout - checking DOM.")
+            locator = page.locator(selector)
 
-        available_sizes = []
+            for i in range(locator.count()):
+                candidate = locator.nth(i)
 
-        if store == "zara":
-            available_sizes = check_stock_zara(
-                driver,
-                sizes_to_check
-            )
+                if candidate.is_visible():
+                    add_button = candidate
+                    print(f"✅ Add button found: {selector}")
+                    break
 
-        elif store == "bershka":
-            available_sizes = check_stock_bershka(
-                driver,
-                sizes_to_check
-            )
+            if add_button:
+                break
 
-        elif store == "stradivarius":
-            available_sizes = check_stock_stradivarius(
-                driver,
-                sizes_to_check
-            )
+        except Exception:
+            continue
 
-        if not available_sizes:
-            print(
-                f"❌ No stock: "
-                f"{', '.join(sizes_to_check)}"
-            )
-            return False
+    if not add_button:
+        print("❌ ADD BUTTON NOT FOUND")
+        return []
 
-        print(
-            "🎉 STOCK FOUND: "
-            + ", ".join(available_sizes)
-        )
-
-        removed = remove_item_from_config(
-            config,
-            item
-        )
-
-        sizes_text = ", ".join(available_sizes)
-
-        message = (
-            f"🛍️ <b>ТОВАР З'ЯВИВСЯ!</b>\n\n"
-            f"👤 <b>{person}</b>\n"
-            f"📏 Розміри: <b>{sizes_text}</b>\n"
-            f"🏪 Магазин: <b>{store.upper()}</b>\n"
-            f"🔗 <a href='{url}'>Відкрити товар</a>\n\n"
-        )
-
-        if removed:
-            message += (
-                "🗑️ Товар автоматично видалено "
-                "зі списку відстеження"
-            )
-
-        if telegram_enabled:
-            send_telegram_message(
-                message,
-                bot_api,
-                chat_id
-            )
-
-        return True
-
+    try:
+        add_button.click(timeout=5000, force=True)
+        print("🛒 Add button clicked")
     except Exception as e:
-        print(f"❌ Item error: {e}")
+        print(f"❌ Add button click failed: {e}")
+        return []
+
+    # Wait for Zara size options.
+    try:
+        page.wait_for_selector(
+            "[data-qa-action^='size-'], .size-selector-sizes-size",
+            timeout=6000
+        )
+    except PlaywrightTimeoutError:
+        print("❌ SIZE SELECTOR NOT FOUND")
+        return []
+
+    page.wait_for_timeout(400)
+
+    wanted = [normalize_size(x) for x in wanted_sizes]
+    available = []
+
+    print(f"🔍 Requested sizes: {', '.join(wanted)}")
+
+    # Primary method: Zara buttons with stock action.
+    size_buttons = page.locator("[data-qa-action^='size-']")
+
+    print(f"📦 Size-action elements found: {size_buttons.count()}")
+
+    checked = set()
+
+    for i in range(size_buttons.count()):
+        button = size_buttons.nth(i)
+
+        try:
+            action = button.get_attribute("data-qa-action") or ""
+
+            # Get text from the button and its closest parent.
+            text = normalize_size(button.inner_text())
+
+            if not text:
+                try:
+                    text = normalize_size(
+                        button.locator("xpath=ancestor::*[self::li or self::div][1]").inner_text()
+                    )
+                except Exception:
+                    pass
+
+            matched_size = None
+
+            for size in wanted:
+                parts = text.split()
+
+                if size == text or size in parts:
+                    matched_size = size
+                    break
+
+            if not matched_size:
+                continue
+
+            if matched_size in checked:
+                continue
+
+            checked.add(matched_size)
+
+            print(
+                f"📏 {matched_size} → "
+                f"{action if action else 'unknown'}"
+            )
+
+            if action in ("size-in-stock", "size-low-on-stock"):
+                available.append(matched_size)
+                print(f"✅ {matched_size} AVAILABLE")
+            else:
+                print(f"❌ {matched_size} unavailable")
+
+        except Exception as e:
+            print(f"⚠️ Size parse error: {e}")
+
+    # Fallback: inspect Zara size containers.
+    if len(checked) < len(wanted):
+        containers = page.locator(".size-selector-sizes-size")
+
+        for i in range(containers.count()):
+            item = containers.nth(i)
+
+            try:
+                text = normalize_size(item.inner_text())
+
+                matched_size = None
+
+                for size in wanted:
+                    if size in checked:
+                        continue
+
+                    parts = text.split()
+
+                    if size == text or size in parts:
+                        matched_size = size
+                        break
+
+                if not matched_size:
+                    continue
+
+                checked.add(matched_size)
+
+                actions = item.locator("[data-qa-action]")
+                action = ""
+
+                if actions.count() > 0:
+                    action = (
+                        actions.first.get_attribute("data-qa-action")
+                        or ""
+                    )
+
+                print(
+                    f"📏 {matched_size} → "
+                    f"{action if action else 'unknown'}"
+                )
+
+                if action in ("size-in-stock", "size-low-on-stock"):
+                    if matched_size not in available:
+                        available.append(matched_size)
+
+                    print(f"✅ {matched_size} AVAILABLE")
+                else:
+                    print(f"❌ {matched_size} unavailable")
+
+            except Exception:
+                continue
+
+    for size in wanted:
+        if size not in checked:
+            print(f"⚠️ {size} was not found in Zara size list")
+
+    print(
+        "🟢 AVAILABLE: "
+        + (", ".join(available) if available else "NONE")
+    )
+
+    return available
+
+
+def check_item(page, item, config, bot_api, chat_id):
+    store = item.get("store", "").lower()
+    url = item.get("url")
+    sizes = item.get("sizes", [])
+    person = item.get("person", "Yulia")
+
+    if store != "zara":
+        print(f"⚠️ Unsupported store: {store}")
         return False
+
+    print("\n" + "=" * 50)
+    print(f"📋 Checking ZARA | sizes: {', '.join(sizes)}")
+
+    available = check_zara(page, url, sizes)
+
+    if not available:
+        print(f"❌ No stock: {', '.join(sizes)}")
+        return False
+
+    removed = remove_item_from_config(config, item)
+
+    sizes_text = ", ".join(available)
+
+    warsaw_time = datetime.now(
+        ZoneInfo("Europe/Warsaw")
+    ).strftime("%H:%M:%S")
+
+    message = (
+        "🛍️ <b>ТОВАР З'ЯВИВСЯ!</b>\n\n"
+        f"👤 <b>{person}</b>\n"
+        f"📏 Розміри: <b>{sizes_text}</b>\n"
+        "🏪 Магазин: <b>ZARA</b>\n"
+        f"🔗 <a href='{url}'>Відкрити товар</a>\n"
+        f"⏰ Час: <b>{warsaw_time}</b>\n\n"
+    )
+
+    if removed:
+        message += "🗑️ Товар автоматично видалено зі списку відстеження"
+
+    send_telegram(
+        message,
+        bot_api,
+        chat_id
+    )
+
+    print(f"🎉 FOUND: {sizes_text}")
+    return True
 
 
 def main():
-    start_time = time.time()
+    start = time.time()
 
-    print("⚡ FAST Zara Stock Checker")
+    print("🎭 PLAYWRIGHT ZARA STOCK CHECKER")
     print(f"📄 Config: {CONFIG_FILE}")
 
     config = load_config()
@@ -288,57 +386,57 @@ def main():
     if not config:
         return
 
-    urls_to_check = list(
-        config.get("urls", [])
-    )
+    items = list(config.get("urls", []))
 
-    if not urls_to_check:
-        print("🎯 No items to check.")
+    if not items:
+        print("🎯 No items in config")
         return
 
-    telegram_enabled, bot_api, chat_id = (
-        setup_telegram()
-    )
+    bot_api, chat_id = telegram_setup()
 
-    driver = setup_chrome_driver()
+    found = 0
 
-    if not driver:
-        return
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
 
-    checked_count = 0
-    found_count = 0
+        context = browser.new_context(
+            locale="pl-PL",
+            timezone_id="Europe/Warsaw",
+            viewport={
+                "width": 1280,
+                "height": 900
+            }
+        )
 
-    try:
-        for item in urls_to_check:
-            checked_count += 1
+        page = context.new_page()
 
+        for index, item in enumerate(items, start=1):
             print(
-                f"\n{'=' * 40}\n"
-                f"📦 Item "
-                f"{checked_count}/{len(urls_to_check)}"
+                f"\n📦 ITEM {index}/{len(items)}"
             )
 
-            if check_single_item(
-                driver,
+            if check_item(
+                page,
                 item,
-                telegram_enabled,
+                config,
                 bot_api,
-                chat_id,
-                config
+                chat_id
             ):
-                found_count += 1
+                found += 1
 
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        browser.close()
 
-    elapsed = time.time() - start_time
+    elapsed = time.time() - start
 
     print("\n⚡ SUMMARY")
-    print(f"✅ Checked: {checked_count}")
-    print(f"🛍️ Found: {found_count}")
+    print(f"✅ Checked: {len(items)}")
+    print(f"🛍️ Found: {found}")
     print(f"⏱️ Total time: {elapsed:.1f} sec")
 
 
