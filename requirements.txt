@@ -1,5 +1,4 @@
-selenium==4.11.2
-webdriver-manager
+playwright==1.55.0
 requests
 certifi
 urllib3
