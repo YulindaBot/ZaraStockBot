@@ -17,7 +17,6 @@ jobs:
         with:
           sparse-checkout: |
             main_github.py
-            scraperHelpers.py
             config1.json
             requirements.txt
           sparse-checkout-cone-mode: false
@@ -33,15 +32,11 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: 🎭 Install Playwright Chromium
+      - name: ⚡ Zara API Stock Check
         run: |
-          python -m playwright install --with-deps chromium
-
-      - name: ⚡ Fast Stock Check
-        run: |
-          echo "⚡ Zara Stock Checker 1"
           timeout 360 python main_github.py
         env:
           BOT_API: ${{ secrets.BOT_API }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+          REEF_KEY: ${{ secrets.REEF_KEY }}
           PYTHONUNBUFFERED: 1
