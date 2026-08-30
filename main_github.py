@@ -10,13 +10,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 import os
+CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
 import requests
 from scraperHelpers import check_stock_zara, check_stock_bershka, check_stock_stradivarius
 
 def load_config():
     """Config dosyasını yükle"""
     try:
-        with open("config.json", "r") as config_file:
+        with open(CONFIG_FILE, "r") as config_file:
             config = json.load(config_file)
         return config
     except FileNotFoundError:
@@ -27,7 +28,7 @@ def save_config(config):
     """Config dosyasını kaydet ve GitHub'a push et"""
     try:
         # Dosyayı kaydet
-        with open("config.json", "w") as config_file:
+        with open(CONFIG_FILE, "w") as config_file:
             json.dump(config, config_file, indent=2, ensure_ascii=False)
         
         # GitHub Actions'ta Git konfigürasyonu ve push
@@ -37,10 +38,10 @@ def save_config(config):
                 subprocess.run(['git', 'config', '--global', 'user.name', 'Stock Checker Bot'], check=True, capture_output=True)
                 subprocess.run(['git', 'config', '--global', 'user.email', 'actions@github.com'], check=True, capture_output=True)
                 
-                # Changes add, commit ve push
-                subprocess.run(['git', 'add', 'config.json'], check=True, capture_output=True)
+                # Changes add, commit ve pus
+                subprocess.run(['git', 'add', CONFIG_FILE], check=True, capture_output=True)
                 
-                # Check if there are changes to commit
+                #Check if there are changes to commit
                 result = subprocess.run(['git', 'diff', '--staged', '--quiet'], capture_output=True)
                 if result.returncode != 0:  # There are changes
                     commit_msg = f"🗑️ Auto-remove found item - {time.strftime('%H:%M:%S')}"
