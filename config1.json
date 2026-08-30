@@ -2,62 +2,89 @@
   "urls": [
     {
       "store": "zara",
-      "url": "https://www.zara.com/pl/pl/marynarka-w-krate-z-kolekcji-zw-p07179049.html?v1=531409084",
-      "sizes": ["S", "M"],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
       "url": "https://www.zara.com/pl/pl/top-w-stylu-bieliznianym-z-koronka-p07969036.html?v1=513368732",
-      "sizes": ["S", "M"],
+      "sizes": [
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/satynowe-spodenki-z-koronka-p01165117.html?v1=527645654",
-      "sizes": ["S", "M"],
+      "sizes": [
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/krotka-sukienka-z-bufiastymi-rekawami-p03897114.html?v1=523328434",
-      "sizes": ["S", "M"],
+      "sizes": [
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/top-gorsetowy-p04661057.html?v1=507030905",
-      "sizes": ["S", "M", "L", "XL"],
+      "sizes": [
+        "S",
+        "M",
+        "L",
+        "XL"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/top-gorsetowy-p04661057.html?v1=526395448",
-      "sizes": ["S", "M"],
+      "sizes": [
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/sweter-z-dzianiny-z-dekoltem-w-serek-p05755153.html?v1=507260268",
-      "sizes": ["XS", "S", "M"],
+      "sizes": [
+        "XS",
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/kardigan-z-grubej-dzianiny-p02142251.html?v1=513107259",
-      "sizes": ["XS", "S", "M"],
+      "sizes": [
+        "XS",
+        "S",
+        "M"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/marynarka-z-tkaniny-strukturalnej-z-metalizowana-nicia-p02293650.html?v1=504020968",
-      "sizes": ["S", "M", "L"],
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/kardigan-z-asymetrycznym-zapieciem-p04938019.html?v1=529584502",
-      "sizes": ["S", "M", "L"],
+      "sizes": [
+        "S",
+        "M",
+        "L"
+      ],
       "person": "Yulia"
     }
   ],
