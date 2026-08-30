@@ -2,8 +2,122 @@
   "urls": [
     {
       "store": "zara",
+      "url": "https://www.zara.com/pl/pl/marynarka-w-krate-z-kolekcji-zw-p07179049.html?v1=531409084",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/top-w-stylu-bieliznianym-z-koronka-p07969036.html?v1=513368732",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/satynowe-spodenki-z-koronka-p01165117.html?v1=527645654",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/krotka-sukienka-z-bufiastymi-rekawami-p03897114.html?v1=523328434",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
       "url": "https://www.zara.com/pl/pl/top-gorsetowy-p04661057.html?v1=507030905",
       "sizes": ["S", "M", "L", "XL"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/top-gorsetowy-p04661057.html?v1=526395448",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/sweter-z-dzianiny-z-dekoltem-w-serek-p05755153.html?v1=507260268",
+      "sizes": ["XS", "S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/kardigan-z-grubej-dzianiny-p02142251.html?v1=513107259",
+      "sizes": ["XS", "S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/marynarka-z-tkaniny-strukturalnej-z-metalizowana-nicia-p02293650.html?v1=504020968",
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/kardigan-z-asymetrycznym-zapieciem-p04938019.html?v1=529584502",
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/satynowy-crop-top-halter-typu-bomba-p02646061.html?v1=548196536",
+      "sizes": ["S"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/spodnie-jeansowe-z-szerokimi-nogawkami-o-skroconym-kroju-z-paskiem-z-kolekcji-z1975-p04725021.html?v1=526171304",
+      "sizes": ["38"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/kardigan-w-paski-p05755051.html?v1=495669738",
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/satynowa-sukienka-z-koronka-z-kolekcji-zw-p02678047.html?v1=555821638",
+      "sizes": ["XS", "S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/dzianinowy-kardigan-w-paski-z-krotkim-rekawem-p02142112.html?v1=495675281",
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/b%C5%82yszczaca-kurtka-z-tkaniny-wodoodpornej-p04323610.html?v1=505714083",
+      "sizes": ["8-9", "9-10"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/kardigan-z-dzianiny-z-kontrastowymi-wykonczeniami-p01822017.html?v1=522878802",
+      "sizes": ["XS", "S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/sukienka-midi-z-tkaniny-satynowej-z-marszczeniami-p02309533.html?v1=526005449",
+      "sizes": ["XS", "S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/marynarka-dopasowana-kolekcja-zw-p07001085.html?v1=560403237",
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/gorset-z-%C5%82aczonych-tkanin-na-ramiaczkach-p01067012.html?v1=501597519",
+      "sizes": ["S", "M", "L"],
       "person": "Yulia"
     }
   ],
