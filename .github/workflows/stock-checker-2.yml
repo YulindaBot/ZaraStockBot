@@ -1,0 +1,49 @@
+name: ⚡ Zara Stock Checker 2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stock-check-2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: write
+
+    steps:
+      - name: ⚡ Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            main_github.py
+            main_github_2.py
+            scraperHelpers.py
+            config1.json
+            config2.json
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      - name: ⚡ Python + Cache
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: ⚡ Chrome
+        run: |
+          google-chrome --version || true
+
+      - name: ⚡ Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: ⚡ Stock Check 2
+        run: |
+          echo "⚡ Zara Stock Checker 2"
+          timeout 360 python main_github_2.py
+        env:
+          BOT_API: ${{ secrets.BOT_API }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          PYTHONUNBUFFERED: 1
+          CHROME_NO_SANDBOX: 1
