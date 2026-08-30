@@ -7,6 +7,7 @@ jobs:
   stock-check-2:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+
     permissions:
       contents: write
 
@@ -18,7 +19,6 @@ jobs:
             main_github.py
             main_github_2.py
             scraperHelpers.py
-            config1.json
             config2.json
             requirements.txt
           sparse-checkout-cone-mode: false
@@ -30,13 +30,13 @@ jobs:
           cache: 'pip'
           cache-dependency-path: 'requirements.txt'
 
-      - name: ⚡ Chrome
-        run: |
-          google-chrome --version || true
-
       - name: ⚡ Install Dependencies
         run: |
           pip install -r requirements.txt
+
+      - name: 🎭 Install Playwright Chromium
+        run: |
+          python -m playwright install --with-deps chromium
 
       - name: ⚡ Stock Check 2
         run: |
@@ -46,4 +46,3 @@ jobs:
           BOT_API: ${{ secrets.BOT_API }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           PYTHONUNBUFFERED: 1
-          CHROME_NO_SANDBOX: 1
