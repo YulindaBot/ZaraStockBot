@@ -3,7 +3,7 @@
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/marynarka-w-krate-z-kolekcji-zw-p07179049.html?v1=531409084",
-      "sizes": ["S", "M"],
+      "sizes": ["XS", "S", "M"],
       "person": "Yulia"
     },
     {
@@ -118,6 +118,43 @@
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/gorset-z-%C5%82aczonych-tkanin-na-ramiaczkach-p01067012.html?v1=501597519",
       "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/krotka-sukienka-z-bufiastymi-rekawami-p03897114.html?v1=538489343",
+      "sizes": ["S", "M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/kopertowy-top-z-tkaniny-boucle-p02298466.html?v1=513117869",
+      "sizes": ["M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/spodnie-jeansowe-z1975-balloon-fit-ze-srednim-stanem-p09942166.html?v1=495703151",
+      "sizes": ["36", "38"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/top-gorsetowy-w-kwiaty-p01131123.html?v1=537586563",
+      "sizes": ["M"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/sukienka-mini-z-tkaniny-satynowej-z-koronka-i-falbankami-p05919126.html?v1=502285280",
+      "sizes": ["XS", "S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/skorzane-balerinki-p11562710.html?v1=522403240",
+      "sizes": ["39"],
       "person": "Yulia"
     }
   ],
