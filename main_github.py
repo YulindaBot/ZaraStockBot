@@ -2,14 +2,20 @@ import json
 import os
 import time
 import subprocess
-import requests
-
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from urllib.parse import urlparse, parse_qs
+
+import requests
 
 
 CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
+
+REEF_API_URL = "https://api.reefapi.com/zara/v1/product_detail"
+REEF_KEY = os.getenv("REEF_KEY")
+
+BOT_API = os.getenv("BOT_API")
+CHAT_ID = os.getenv("CHAT_ID")
 
 
 def load_config():
@@ -24,17 +30,34 @@ def load_config():
 def save_config(config):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+            json.dump(
+                config,
+                f,
+                indent=2,
+                ensure_ascii=False
+            )
 
         if os.getenv("GITHUB_ACTIONS"):
             subprocess.run(
-                ["git", "config", "--global", "user.name", "Stock Checker Bot"],
+                [
+                    "git",
+                    "config",
+                    "--global",
+                    "user.name",
+                    "Stock Checker Bot"
+                ],
                 check=True,
                 capture_output=True
             )
 
             subprocess.run(
-                ["git", "config", "--global", "user.email", "actions@github.com"],
+                [
+                    "git",
+                    "config",
+                    "--global",
+                    "user.email",
+                    "actions@github.com"
+                ],
                 check=True,
                 capture_output=True
             )
@@ -45,14 +68,19 @@ def save_config(config):
                 capture_output=True
             )
 
-            result = subprocess.run(
+            diff = subprocess.run(
                 ["git", "diff", "--staged", "--quiet"],
                 capture_output=True
             )
 
-            if result.returncode != 0:
+            if diff.returncode != 0:
                 subprocess.run(
-                    ["git", "commit", "-m", "Auto-remove found Zara item"],
+                    [
+                        "git",
+                        "commit",
+                        "-m",
+                        "Auto-remove found Zara item"
+                    ],
                     check=True,
                     capture_output=True
                 )
@@ -86,22 +114,16 @@ def remove_item_from_config(config, item):
     return False
 
 
-def telegram_setup():
-    bot_api = os.getenv("BOT_API")
-    chat_id = os.getenv("CHAT_ID")
-    return bot_api, chat_id
-
-
-def send_telegram(message, bot_api, chat_id):
-    if not bot_api or not chat_id:
+def send_telegram(message):
+    if not BOT_API or not CHAT_ID:
         print("⚠️ Telegram credentials missing")
-        return
+        return False
 
     try:
         response = requests.post(
-            f"https://api.telegram.org/bot{bot_api}/sendMessage",
+            f"https://api.telegram.org/bot{BOT_API}/sendMessage",
             data={
-                "chat_id": chat_id,
+                "chat_id": CHAT_ID,
                 "text": message,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
@@ -110,223 +132,269 @@ def send_telegram(message, bot_api, chat_id):
         )
 
         response.raise_for_status()
-        print("✅ Telegram sent")
+
+        print("✅ Telegram message sent")
+        return True
 
     except Exception as e:
         print(f"❌ Telegram error: {e}")
+        return False
 
 
-def normalize_size(text):
+def normalize_size(value):
+    if value is None:
+        return ""
+
     return (
-        text.replace("\n", " ")
+        str(value)
+        .replace("\n", " ")
         .replace("\t", " ")
         .strip()
         .upper()
     )
 
 
-def check_zara(page, url, wanted_sizes):
-    print(f"🌐 Opening: {url}")
-
+def get_product_id_from_url(url):
     try:
-        page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=15000
-        )
-    except PlaywrightTimeoutError:
-        print("⚠️ Page load timeout, continuing...")
+        query = parse_qs(urlparse(url).query)
+        values = query.get("v1", [])
 
-    # Allow Zara JS a moment to render the product controls.
-    page.wait_for_timeout(1200)
+        if values:
+            return str(values[0])
 
-    # Cookies
-    try:
-        cookie = page.locator("#onetrust-accept-btn-handler")
-
-        if cookie.count() > 0 and cookie.first.is_visible():
-            cookie.first.click(timeout=2000)
-            print("🍪 Cookies accepted")
-            page.wait_for_timeout(300)
     except Exception:
         pass
 
-    # Find ADD button using several methods.
-    add_selectors = [
-        "button[data-qa-action='add-to-cart']",
-        "[data-qa-action='add-to-cart']",
-        "button:has-text('Dodaj')",
-        "[role='button']:has-text('Dodaj')"
-    ]
+    return None
 
-    add_button = None
 
-    for selector in add_selectors:
-        try:
-            locator = page.locator(selector)
+def reef_product_detail(url):
+    if not REEF_KEY:
+        raise RuntimeError("REEF_KEY is missing")
 
-            for i in range(locator.count()):
-                candidate = locator.nth(i)
-
-                if candidate.is_visible():
-                    add_button = candidate
-                    print(f"✅ Add button found: {selector}")
-                    break
-
-            if add_button:
-                break
-
-        except Exception:
-            continue
-
-    if not add_button:
-        print("❌ ADD BUTTON NOT FOUND")
-        return []
-
-    try:
-        add_button.click(timeout=5000, force=True)
-        print("🛒 Add button clicked")
-    except Exception as e:
-        print(f"❌ Add button click failed: {e}")
-        return []
-
-    # Wait for Zara size options.
-    try:
-        page.wait_for_selector(
-            "[data-qa-action^='size-'], .size-selector-sizes-size",
-            timeout=6000
-        )
-    except PlaywrightTimeoutError:
-        print("❌ SIZE SELECTOR NOT FOUND")
-        return []
-
-    page.wait_for_timeout(400)
-
-    wanted = [normalize_size(x) for x in wanted_sizes]
-    available = []
-
-    print(f"🔍 Requested sizes: {', '.join(wanted)}")
-
-    # Primary method: Zara buttons with stock action.
-    size_buttons = page.locator("[data-qa-action^='size-']")
-
-    print(f"📦 Size-action elements found: {size_buttons.count()}")
-
-    checked = set()
-
-    for i in range(size_buttons.count()):
-        button = size_buttons.nth(i)
-
-        try:
-            action = button.get_attribute("data-qa-action") or ""
-
-            # Get text from the button and its closest parent.
-            text = normalize_size(button.inner_text())
-
-            if not text:
-                try:
-                    text = normalize_size(
-                        button.locator("xpath=ancestor::*[self::li or self::div][1]").inner_text()
-                    )
-                except Exception:
-                    pass
-
-            matched_size = None
-
-            for size in wanted:
-                parts = text.split()
-
-                if size == text or size in parts:
-                    matched_size = size
-                    break
-
-            if not matched_size:
-                continue
-
-            if matched_size in checked:
-                continue
-
-            checked.add(matched_size)
-
-            print(
-                f"📏 {matched_size} → "
-                f"{action if action else 'unknown'}"
-            )
-
-            if action in ("size-in-stock", "size-low-on-stock"):
-                available.append(matched_size)
-                print(f"✅ {matched_size} AVAILABLE")
-            else:
-                print(f"❌ {matched_size} unavailable")
-
-        except Exception as e:
-            print(f"⚠️ Size parse error: {e}")
-
-    # Fallback: inspect Zara size containers.
-    if len(checked) < len(wanted):
-        containers = page.locator(".size-selector-sizes-size")
-
-        for i in range(containers.count()):
-            item = containers.nth(i)
-
-            try:
-                text = normalize_size(item.inner_text())
-
-                matched_size = None
-
-                for size in wanted:
-                    if size in checked:
-                        continue
-
-                    parts = text.split()
-
-                    if size == text or size in parts:
-                        matched_size = size
-                        break
-
-                if not matched_size:
-                    continue
-
-                checked.add(matched_size)
-
-                actions = item.locator("[data-qa-action]")
-                action = ""
-
-                if actions.count() > 0:
-                    action = (
-                        actions.first.get_attribute("data-qa-action")
-                        or ""
-                    )
-
-                print(
-                    f"📏 {matched_size} → "
-                    f"{action if action else 'unknown'}"
-                )
-
-                if action in ("size-in-stock", "size-low-on-stock"):
-                    if matched_size not in available:
-                        available.append(matched_size)
-
-                    print(f"✅ {matched_size} AVAILABLE")
-                else:
-                    print(f"❌ {matched_size} unavailable")
-
-            except Exception:
-                continue
-
-    for size in wanted:
-        if size not in checked:
-            print(f"⚠️ {size} was not found in Zara size list")
-
-    print(
-        "🟢 AVAILABLE: "
-        + (", ".join(available) if available else "NONE")
+    response = requests.post(
+        REEF_API_URL,
+        headers={
+            "x-api-key": REEF_KEY,
+            "content-type": "application/json"
+        },
+        json={
+            "url": url,
+            "market": "pl",
+            "include_composition": False,
+            "find_market": False
+        },
+        timeout=30
     )
 
-    return available
+    print(f"🌊 ReefAPI HTTP: {response.status_code}")
+
+    response.raise_for_status()
+
+    payload = response.json()
+
+    if not payload.get("ok"):
+        print(
+            "❌ ReefAPI returned error: "
+            f"{payload.get('error')}"
+        )
+        return None
+
+    return payload.get("data")
 
 
-def check_item(page, item, config, bot_api, chat_id):
+def find_matching_color(data, wanted_product_id):
+    if not isinstance(data, dict):
+        return None
+
+    # ReefAPI docs describe product_detail.colors[]
+    colors = data.get("colors")
+
+    if isinstance(colors, list):
+        # First try exact color/product ID from ?v1=
+        for color in colors:
+            if not isinstance(color, dict):
+                continue
+
+            color_product_id = color.get("product_id")
+
+            if (
+                wanted_product_id
+                and color_product_id is not None
+                and str(color_product_id) == str(wanted_product_id)
+            ):
+                return color
+
+        # If API returns only one color, use it safely.
+        if len(colors) == 1 and isinstance(colors[0], dict):
+            return colors[0]
+
+    # Some response shapes may put sizes on the main object.
+    if isinstance(data.get("sizes"), list):
+        return data
+
+    return None
+
+
+def get_size_rows(data, product_id):
+    color = find_matching_color(data, product_id)
+
+    if color:
+        sizes = color.get("sizes")
+
+        if isinstance(sizes, list):
+            return sizes
+
+    # Conservative fallback:
+    # recursively search only for an object matching the exact product_id
+    def walk(obj):
+        if isinstance(obj, dict):
+            obj_product_id = obj.get("product_id")
+
+            if (
+                product_id
+                and obj_product_id is not None
+                and str(obj_product_id) == str(product_id)
+                and isinstance(obj.get("sizes"), list)
+            ):
+                return obj["sizes"]
+
+            for value in obj.values():
+                result = walk(value)
+
+                if result is not None:
+                    return result
+
+        elif isinstance(obj, list):
+            for value in obj:
+                result = walk(value)
+
+                if result is not None:
+                    return result
+
+        return None
+
+    result = walk(data)
+
+    return result if result is not None else []
+
+
+def check_zara(url, wanted_sizes):
+    print(f"🌐 {url}")
+
+    product_id = get_product_id_from_url(url)
+
+    print(
+        f"🆔 Zara product/color ID: "
+        f"{product_id if product_id else 'not found'}"
+    )
+
+    try:
+        data = reef_product_detail(url)
+
+    except requests.HTTPError as e:
+        response = getattr(e, "response", None)
+
+        if response is not None:
+            print(
+                f"❌ ReefAPI HTTP error: "
+                f"{response.status_code}"
+            )
+
+            try:
+                print(response.text[:1000])
+            except Exception:
+                pass
+
+        return []
+
+    except Exception as e:
+        print(f"❌ ReefAPI request error: {e}")
+        return []
+
+    if not data:
+        print("❌ ReefAPI returned no product data")
+        return []
+
+    size_rows = get_size_rows(
+        data,
+        product_id
+    )
+
+    print(f"📦 Size rows received: {len(size_rows)}")
+
+    wanted_normalized = [
+        normalize_size(size)
+        for size in wanted_sizes
+    ]
+
+    found = {}
+    available_sizes = []
+
+    for row in size_rows:
+        if not isinstance(row, dict):
+            continue
+
+        name = normalize_size(row.get("name"))
+
+        if not name:
+            continue
+
+        if name not in wanted_normalized:
+            continue
+
+        availability = str(
+            row.get("availability") or ""
+        ).lower()
+
+        in_stock = row.get("in_stock")
+
+        found[name] = True
+
+        print(
+            f"📏 {name}"
+            f" | availability={availability}"
+            f" | in_stock={in_stock}"
+        )
+
+        # ReefAPI gives a direct boolean.
+        if in_stock is True:
+            available_sizes.append(name)
+            print(f"✅ {name} AVAILABLE")
+
+        else:
+            print(f"❌ {name} unavailable")
+
+    for size in wanted_normalized:
+        if size not in found:
+            print(
+                f"⚠️ Requested size {size} "
+                f"not present in API response"
+            )
+
+    # Keep config order and remove duplicates.
+    ordered_available = []
+
+    for size in wanted_normalized:
+        if (
+            size in available_sizes
+            and size not in ordered_available
+        ):
+            ordered_available.append(size)
+
+    print(
+        "🟢 AVAILABLE REQUESTED SIZES: "
+        + (
+            ", ".join(ordered_available)
+            if ordered_available
+            else "NONE"
+        )
+    )
+
+    return ordered_available
+
+
+def check_item(item, config):
     store = item.get("store", "").lower()
     url = item.get("url")
     sizes = item.get("sizes", [])
@@ -336,19 +404,33 @@ def check_item(page, item, config, bot_api, chat_id):
         print(f"⚠️ Unsupported store: {store}")
         return False
 
-    print("\n" + "=" * 50)
-    print(f"📋 Checking ZARA | sizes: {', '.join(sizes)}")
-
-    available = check_zara(page, url, sizes)
-
-    if not available:
-        print(f"❌ No stock: {', '.join(sizes)}")
+    if not url:
+        print("⚠️ Missing URL")
         return False
 
-    removed = remove_item_from_config(config, item)
+    print("\n" + "=" * 55)
+    print(
+        f"📋 Checking ZARA "
+        f"| sizes: {', '.join(sizes)}"
+    )
+
+    available = check_zara(
+        url,
+        sizes
+    )
+
+    if not available:
+        print(
+            f"❌ No requested stock: "
+            f"{', '.join(sizes)}"
+        )
+        return False
 
     sizes_text = ", ".join(available)
 
+    print(f"🎉 FOUND: {sizes_text}")
+
+    # Send alert first.
     warsaw_time = datetime.now(
         ZoneInfo("Europe/Warsaw")
     ).strftime("%H:%M:%S")
@@ -359,83 +441,93 @@ def check_item(page, item, config, bot_api, chat_id):
         f"📏 Розміри: <b>{sizes_text}</b>\n"
         "🏪 Магазин: <b>ZARA</b>\n"
         f"🔗 <a href='{url}'>Відкрити товар</a>\n"
-        f"⏰ Час: <b>{warsaw_time}</b>\n\n"
+        f"⏰ Час: <b>{warsaw_time}</b>"
     )
 
-    if removed:
-        message += "🗑️ Товар автоматично видалено зі списку відстеження"
+    telegram_ok = send_telegram(message)
 
-    send_telegram(
-        message,
-        bot_api,
-        chat_id
-    )
+    # Only remove after Telegram succeeds.
+    # This avoids losing an item if Telegram itself fails.
+    if telegram_ok:
+        removed = remove_item_from_config(
+            config,
+            item
+        )
 
-    print(f"🎉 FOUND: {sizes_text}")
+        if removed:
+            print(
+                "🗑️ Product removed "
+                "from tracking config"
+            )
+        else:
+            print(
+                "⚠️ Product found, but "
+                "config removal failed"
+            )
+
+    else:
+        print(
+            "⚠️ Product NOT removed because "
+            "Telegram notification failed"
+        )
+
     return True
 
 
 def main():
     start = time.time()
 
-    print("🎭 PLAYWRIGHT ZARA STOCK CHECKER")
+    print("🌊 REEFAPI ZARA STOCK CHECKER")
     print(f"📄 Config: {CONFIG_FILE}")
+
+    if not REEF_KEY:
+        print("❌ REEF_KEY secret is missing")
+        return
 
     config = load_config()
 
     if not config:
         return
 
-    items = list(config.get("urls", []))
+    items = list(
+        config.get("urls", [])
+    )
 
     if not items:
         print("🎯 No items in config")
         return
 
-    bot_api, chat_id = telegram_setup()
-
+    checked = 0
     found = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
+    for index, item in enumerate(
+        items,
+        start=1
+    ):
+        print(
+            f"\n📦 ITEM "
+            f"{index}/{len(items)}"
         )
 
-        context = browser.new_context(
-            locale="pl-PL",
-            timezone_id="Europe/Warsaw",
-            viewport={
-                "width": 1280,
-                "height": 900
-            }
-        )
+        checked += 1
 
-        page = context.new_page()
-
-        for index, item in enumerate(items, start=1):
-            print(
-                f"\n📦 ITEM {index}/{len(items)}"
-            )
-
+        try:
             if check_item(
-                page,
                 item,
-                config,
-                bot_api,
-                chat_id
+                config
             ):
                 found += 1
 
-        browser.close()
+        except Exception as e:
+            print(
+                f"❌ Unexpected item error: {e}"
+            )
 
     elapsed = time.time() - start
 
-    print("\n⚡ SUMMARY")
-    print(f"✅ Checked: {len(items)}")
+    print("\n" + "=" * 55)
+    print("🌊 SUMMARY")
+    print(f"✅ Checked: {checked}")
     print(f"🛍️ Found: {found}")
     print(f"⏱️ Total time: {elapsed:.1f} sec")
 
