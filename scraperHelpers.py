@@ -1,10 +1,14 @@
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
 
 def check_stock_zara(driver, sizes_to_check):
+    """
+    Перевіряє всі задані розміри Zara БЕЗ натискання Add to cart.
+    Повертає список усіх доступних розмірів.
+    """
+
     try:
         wait = WebDriverWait(driver, 8)
 
@@ -14,6 +18,7 @@ def check_stock_zara(driver, sizes_to_check):
                 By.ID,
                 "onetrust-accept-btn-handler"
             )
+
             if cookie_buttons and cookie_buttons[0].is_displayed():
                 driver.execute_script(
                     "arguments[0].click();",
@@ -22,127 +27,185 @@ def check_stock_zara(driver, sizes_to_check):
         except Exception:
             pass
 
-        # Zara can use different selectors for the add button
-        selectors = [
-            "button[data-qa-action='add-to-cart']",
-            "button[data-qa-action*='add']",
-            "button[class*='add-to-cart']",
-            "[data-qa-action='add-to-cart']"
-        ]
-
-        add_button = None
-
-        for selector in selectors:
-            try:
-                elements = WebDriverWait(driver, 3).until(
-                    lambda d: d.find_elements(By.CSS_SELECTOR, selector)
-                )
-
-                for element in elements:
-                    if element.is_displayed():
-                        add_button = element
-                        break
-
-                if add_button:
-                    break
-
-            except Exception:
-                continue
-
-        if not add_button:
-            print("❌ Zara add button not found.")
-            return []
-
-        # Remove overlay if present
-        try:
-            overlays = driver.find_elements(
-                By.CLASS_NAME,
-                "zds-backdrop"
-            )
-            for overlay in overlays:
-                driver.execute_script(
-                    "arguments[0].remove();",
-                    overlay
-                )
-        except Exception:
-            pass
-
-        try:
-            driver.execute_script(
-                "arguments[0].click();",
-                add_button
-            )
-        except Exception as e:
-            print(f"❌ Could not click Zara add button: {e}")
-            return []
-
-        # Wait for size elements
+        # Чекаємо, поки Zara завантажить елементи розмірів у DOM.
+        # Вони можуть бути навіть прихованими на сторінці.
         try:
             wait.until(
                 lambda d: len(
                     d.find_elements(
-                        By.CLASS_NAME,
-                        "size-selector-sizes-size"
+                        By.CSS_SELECTOR,
+                        "[data-qa-action='size-in-stock'], "
+                        "[data-qa-action='size-low-on-stock'], "
+                        "[data-qa-action='size-out-of-stock'], "
+                        ".size-selector-sizes-size"
                     )
                 ) > 0
             )
         except TimeoutException:
-            print("❌ Zara size selector not found.")
+            print("❌ Zara size data not found in DOM.")
             return []
-
-        size_elements = driver.find_elements(
-            By.CLASS_NAME,
-            "size-selector-sizes-size"
-        )
 
         available_sizes = []
 
-        for wanted_size in sizes_to_check:
-            found_size = False
+        print("🔎 Looking for Zara sizes directly in DOM...")
 
-            for li in size_elements:
+        # Беремо всі елементи, які Zara позначає як розміри
+        size_items = driver.find_elements(
+            By.CSS_SELECTOR,
+            ".size-selector-sizes-size"
+        )
+
+        print(f"📦 Size elements found: {len(size_items)}")
+
+        for wanted_size in sizes_to_check:
+            found_requested_size = False
+
+            for item in size_items:
                 try:
-                    label = li.find_element(
-                        By.CSS_SELECTOR,
-                        "div[data-qa-qualifier='size-selector-sizes-size-label']"
-                    ).text.strip()
+                    # Пробуємо кілька способів отримати назву розміру
+                    label = ""
+
+                    label_selectors = [
+                        "div[data-qa-qualifier='size-selector-sizes-size-label']",
+                        "[data-qa-qualifier='size-selector-sizes-size-label']",
+                        ".size-selector-sizes-size__label",
+                        "span"
+                    ]
+
+                    for selector in label_selectors:
+                        try:
+                            elements = item.find_elements(
+                                By.CSS_SELECTOR,
+                                selector
+                            )
+
+                            for element in elements:
+                                text = element.text.strip()
+
+                                if text:
+                                    label = text
+                                    break
+
+                            if label:
+                                break
+
+                        except Exception:
+                            continue
+
+                    # Якщо окремий label не знайшли
+                    if not label:
+                        label = item.text.strip().split("\n")[0]
 
                     if label != wanted_size:
                         continue
 
-                    found_size = True
+                    found_requested_size = True
 
-                    button = li.find_element(
-                        By.CLASS_NAME,
-                        "size-selector-sizes-size__button"
+                    # Шукаємо кнопку/елемент стану цього розміру
+                    buttons = item.find_elements(
+                        By.CSS_SELECTOR,
+                        "[data-qa-action]"
                     )
 
-                    action = (
-                        button.get_attribute("data-qa-action")
-                        or ""
+                    action = ""
+
+                    for button in buttons:
+                        current_action = (
+                            button.get_attribute("data-qa-action")
+                            or ""
+                        )
+
+                        if current_action:
+                            action = current_action
+                            break
+
+                    print(
+                        f"📏 {wanted_size} → action: "
+                        f"{action if action else 'unknown'}"
                     )
 
                     if action in [
                         "size-in-stock",
                         "size-low-on-stock"
                     ]:
-                        print(f"✅ {wanted_size} is in stock.")
-                        available_sizes.append(wanted_size)
+                        print(
+                            f"✅ {wanted_size} is in stock."
+                        )
+
+                        available_sizes.append(
+                            wanted_size
+                        )
+
+                    elif action == "size-out-of-stock":
+                        print(
+                            f"❌ {wanted_size} is out of stock."
+                        )
+
                     else:
-                        print(f"❌ {wanted_size} is out of stock.")
+                        # Додаткова перевірка атрибутів
+                        item_class = (
+                            item.get_attribute("class")
+                            or ""
+                        ).lower()
+
+                        aria_disabled = (
+                            item.get_attribute("aria-disabled")
+                            or ""
+                        ).lower()
+
+                        disabled_words = [
+                            "disabled",
+                            "unavailable",
+                            "out-of-stock",
+                            "sold-out"
+                        ]
+
+                        if (
+                            aria_disabled == "true"
+                            or any(
+                                word in item_class
+                                for word in disabled_words
+                            )
+                        ):
+                            print(
+                                f"❌ {wanted_size} appears unavailable."
+                            )
+                        else:
+                            # Не вважаємо товар доступним,
+                            # якщо Zara не дала чіткий сигнал.
+                            print(
+                                f"⚠️ {wanted_size}: "
+                                f"availability unclear."
+                            )
 
                     break
 
-                except Exception:
+                except Exception as e:
+                    print(
+                        f"⚠️ Error checking "
+                        f"{wanted_size}: {e}"
+                    )
                     continue
 
-            if not found_size:
-                print(f"⚠️ {wanted_size} not found in size list.")
+            if not found_requested_size:
+                print(
+                    f"⚠️ {wanted_size} not found "
+                    f"in Zara size list."
+                )
+
+        print(
+            "🟢 AVAILABLE REQUESTED SIZES: "
+            + (
+                ", ".join(available_sizes)
+                if available_sizes
+                else "NONE"
+            )
+        )
 
         return available_sizes
 
     except Exception as e:
-        print(f"❌ Zara check error: {e}")
+        print(f"❌ Zara checker error: {e}")
         return []
 
 
