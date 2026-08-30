@@ -3,97 +3,67 @@
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/satynowy-crop-top-halter-typu-bomba-p02646061.html?v1=548196536",
-      "sizes": [
-        "S"
-      ],
+      "sizes": ["S"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/spodnie-jeansowe-z-szerokimi-nogawkami-o-skroconym-kroju-z-paskiem-z-kolekcji-z1975-p04725021.html?v1=526171304",
-      "sizes": [
-        "38"
-      ],
+      "sizes": ["38"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/kardigan-w-paski-p05755051.html?v1=495669738",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
+      "sizes": ["S", "M", "L"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/satynowa-sukienka-z-koronka-z-kolekcji-zw-p02678047.html?v1=555821638",
-      "sizes": [
-        "XS",
-        "S",
-        "M",
-        "L"
-      ],
+      "sizes": ["XS", "S", "M", "L"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/dzianinowy-kardigan-w-paski-z-krotkim-rekawem-p02142112.html?v1=495675281",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
+      "sizes": ["S", "M", "L"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/b%C5%82yszczaca-kurtka-z-tkaniny-wodoodpornej-p04323610.html?v1=505714083",
-      "sizes": [
-        "8-9",
-        "9-10"
-      ],
+      "sizes": ["8-9", "9-10"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/kardigan-z-dzianiny-z-kontrastowymi-wykonczeniami-p01822017.html?v1=522878802",
-      "sizes": [
-        "XS",
-        "S",
-        "M"
-      ],
+      "sizes": ["XS", "S", "M"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/sukienka-midi-z-tkaniny-satynowej-z-marszczeniami-p02309533.html?v1=526005449",
-      "sizes": [
-        "XS",
-        "S",
-        "M"
-      ],
+      "sizes": ["XS", "S", "M"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/marynarka-dopasowana-kolekcja-zw-p07001085.html?v1=560403237",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
+      "sizes": ["S", "M", "L"],
       "person": "Yulia"
     },
     {
       "store": "zara",
       "url": "https://www.zara.com/pl/pl/gorset-z-%C5%82aczonych-tkanin-na-ramiaczkach-p01067012.html?v1=501597519",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
+      "sizes": ["S", "M", "L"],
+      "person": "Yulia"
+    },
+    {
+      "store": "zara",
+      "url": "https://www.zara.com/pl/pl/top-halter-z-koronkowymi-wstawkami-p00085808.html?v1=549528350",
+      "sizes": ["S", "M", "L"],
       "person": "Yulia"
     }
   ]
