@@ -2,89 +2,23 @@
   "urls": [
     {
       "store": "zara",
-      "url": "https://www.zara.com/pl/pl/satynowy-crop-top-halter-typu-bomba-p02646061.html?v1=548196536",
-      "sizes": [
-        "S"
-      ],
+      "url": "https://www.zara.com/ua/uk/%D0%BC%D1%96%D0%BD%D1%96%D1%88%D0%BA%D1%96%D1%80%D1%8F%D0%BD%D0%B0-%D1%81%D1%83%D0%BC%D0%BA%D0%B0-%D0%B7%D1%96-%D0%B7%D0%B1%D0%BE%D1%80%D0%BA%D0%B0%D0%BC%D0%B8-p16102810.html",
+      "sizes": [],
       "person": "Yulia"
     },
     {
       "store": "zara",
-      "url": "https://www.zara.com/pl/pl/spodnie-jeansowe-z-szerokimi-nogawkami-o-skroconym-kroju-z-paskiem-z-kolekcji-z1975-p04725021.html?v1=526171304",
-      "sizes": [
-        "38"
-      ],
+      "url": "https://www.zara.com/pl/pl/skorzana-mini-torebka-z-marszczeniem-p16102810.html",
+      "sizes": [],
       "person": "Yulia"
     },
     {
       "store": "zara",
-      "url": "https://www.zara.com/pl/pl/kardigan-w-paski-p05755051.html?v1=495669738",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/satynowa-sukienka-z-koronka-z-kolekcji-zw-p02678047.html?v1=555821638",
-      "sizes": [
-        "XS",
-        "S",
-        "M",
-        "L"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/dzianinowy-kardigan-w-paski-z-krotkim-rekawem-p02142112.html?v1=495675281",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/b%C5%82yszczaca-kurtka-z-tkaniny-wodoodpornej-p04323610.html?v1=505714083",
-      "sizes": [
-        "8-9",
-        "9-10"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/kardigan-z-dzianiny-z-kontrastowymi-wykonczeniami-p01822017.html?v1=522878802",
-      "sizes": [
-        "XS",
-        "S",
-        "M"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/sukienka-midi-z-tkaniny-satynowej-z-marszczeniami-p02309533.html?v1=526005449",
-      "sizes": [
-        "XS",
-        "S",
-        "M"
-      ],
-      "person": "Yulia"
-    },
-    {
-      "store": "zara",
-      "url": "https://www.zara.com/pl/pl/gorset-z-%C5%82aczonych-tkanin-na-ramiaczkach-p01067012.html?v1=501597519",
-      "sizes": [
-        "S",
-        "M",
-        "L"
-      ],
+      "url": "https://www.zara.com/pl/pl/skorzana-owalna-torebka-na-ramie-p16310810.html",
+      "sizes": [],
       "person": "Yulia"
     }
-  ]
+  ],
+  "sleep_min_seconds": 60,
+  "sleep_max_seconds": 180
 }
