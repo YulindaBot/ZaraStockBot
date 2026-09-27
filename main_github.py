@@ -18,10 +18,15 @@ BOT_API = os.getenv("BOT_API")
 CHAT_ID = os.getenv("CHAT_ID")
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 def load_config():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
+
     except Exception as e:
         print(f"❌ Config load error: {e}")
         return None
@@ -37,7 +42,10 @@ def save_config(config):
                 ensure_ascii=False
             )
 
+        # Якщо бот працює через GitHub Actions —
+        # записуємо зміни назад у репозиторій.
         if os.getenv("GITHUB_ACTIONS"):
+
             subprocess.run(
                 [
                     "git",
@@ -73,7 +81,9 @@ def save_config(config):
                 capture_output=True
             )
 
+            # Якщо файл реально змінився
             if diff.returncode != 0:
+
                 subprocess.run(
                     [
                         "git",
@@ -104,7 +114,8 @@ def remove_item_from_config(config, item):
     before = len(config.get("urls", []))
 
     config["urls"] = [
-        x for x in config.get("urls", [])
+        x
+        for x in config.get("urls", [])
         if x.get("url") != item.get("url")
     ]
 
@@ -113,6 +124,10 @@ def remove_item_from_config(config, item):
 
     return False
 
+
+# ============================================================
+# TELEGRAM
+# ============================================================
 
 def send_telegram(message):
     if not BOT_API or not CHAT_ID:
@@ -141,6 +156,10 @@ def send_telegram(message):
         return False
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
 def normalize_size(value):
     if value is None:
         return ""
@@ -155,8 +174,15 @@ def normalize_size(value):
 
 
 def get_product_id_from_url(url):
+    """
+    Zara Share links contain:
+    ?v1=545893127
+
+    ReefAPI uses this as the product/color ID.
+    """
     try:
         query = parse_qs(urlparse(url).query)
+
         values = query.get("v1", [])
 
         if values:
@@ -167,6 +193,10 @@ def get_product_id_from_url(url):
 
     return None
 
+
+# ============================================================
+# REEF API
+# ============================================================
 
 def reef_product_detail(url):
     if not REEF_KEY:
@@ -203,16 +233,21 @@ def reef_product_detail(url):
     return payload.get("data")
 
 
+# ============================================================
+# ZARA DATA PARSING
+# ============================================================
+
 def find_matching_color(data, wanted_product_id):
     if not isinstance(data, dict):
         return None
 
-    # ReefAPI docs describe product_detail.colors[]
     colors = data.get("colors")
 
     if isinstance(colors, list):
-        # First try exact color/product ID from ?v1=
+
+        # Спочатку шукаємо точний product/color ID з ?v1=
         for color in colors:
+
             if not isinstance(color, dict):
                 continue
 
@@ -225,11 +260,13 @@ def find_matching_color(data, wanted_product_id):
             ):
                 return color
 
-        # If API returns only one color, use it safely.
+        # Якщо ReefAPI повернув тільки один колір —
+        # можемо використати його.
         if len(colors) == 1 and isinstance(colors[0], dict):
             return colors[0]
 
-    # Some response shapes may put sizes on the main object.
+    # Деякі відповіді ReefAPI можуть містити sizes
+    # безпосередньо в основному об'єкті.
     if isinstance(data.get("sizes"), list):
         return data
 
@@ -237,7 +274,10 @@ def find_matching_color(data, wanted_product_id):
 
 
 def get_size_rows(data, product_id):
-    color = find_matching_color(data, product_id)
+    color = find_matching_color(
+        data,
+        product_id
+    )
 
     if color:
         sizes = color.get("sizes")
@@ -245,10 +285,11 @@ def get_size_rows(data, product_id):
         if isinstance(sizes, list):
             return sizes
 
-    # Conservative fallback:
-    # recursively search only for an object matching the exact product_id
+    # Додатковий пошук усередині відповіді API.
     def walk(obj):
+
         if isinstance(obj, dict):
+
             obj_product_id = obj.get("product_id")
 
             if (
@@ -260,13 +301,16 @@ def get_size_rows(data, product_id):
                 return obj["sizes"]
 
             for value in obj.values():
+
                 result = walk(value)
 
                 if result is not None:
                     return result
 
         elif isinstance(obj, list):
+
             for value in obj:
+
                 result = walk(value)
 
                 if result is not None:
@@ -279,13 +323,47 @@ def get_size_rows(data, product_id):
     return result if result is not None else []
 
 
+# ============================================================
+# STOCK CHECK
+# ============================================================
+
+def row_is_available(row):
+    """
+    ReefAPI normally provides in_stock=True/False.
+
+    availability is kept as a fallback.
+    """
+    if not isinstance(row, dict):
+        return False
+
+    in_stock = row.get("in_stock")
+
+    if in_stock is True:
+        return True
+
+    availability = normalize_size(
+        row.get("availability")
+    )
+
+    available_values = {
+        "AVAILABLE",
+        "IN_STOCK",
+        "IN STOCK",
+        "LOW_ON_STOCK",
+        "LOW ON STOCK",
+        "LOW_STOCK"
+    }
+
+    return availability in available_values
+
+
 def check_zara(url, wanted_sizes):
     print(f"🌐 {url}")
 
     product_id = get_product_id_from_url(url)
 
     print(
-        f"🆔 Zara product/color ID: "
+        "🆔 Zara product/color ID: "
         f"{product_id if product_id else 'not found'}"
     )
 
@@ -293,11 +371,13 @@ def check_zara(url, wanted_sizes):
         data = reef_product_detail(url)
 
     except requests.HTTPError as e:
+
         response = getattr(e, "response", None)
 
         if response is not None:
+
             print(
-                f"❌ ReefAPI HTTP error: "
+                "❌ ReefAPI HTTP error: "
                 f"{response.status_code}"
             )
 
@@ -321,21 +401,87 @@ def check_zara(url, wanted_sizes):
         product_id
     )
 
-    print(f"📦 Size rows received: {len(size_rows)}")
+    print(
+        f"📦 Size rows received: "
+        f"{len(size_rows)}"
+    )
 
     wanted_normalized = [
         normalize_size(size)
         for size in wanted_sizes
+        if normalize_size(size)
     ]
+
+    # ========================================================
+    # ТОВАР БЕЗ РОЗМІРУ
+    # Наприклад: сумка, аксесуар тощо.
+    #
+    # У config:
+    # "sizes": []
+    # ========================================================
+
+    if not wanted_normalized:
+
+        print(
+            "👜 Product has no requested sizes — "
+            "checking general availability"
+        )
+
+        if not size_rows:
+            print("❌ No stock rows received")
+            return []
+
+        for row in size_rows:
+
+            if not isinstance(row, dict):
+                continue
+
+            name = normalize_size(
+                row.get("name")
+            )
+
+            availability = normalize_size(
+                row.get("availability")
+            )
+
+            in_stock = row.get("in_stock")
+
+            print(
+                "👜 ITEM WITHOUT SIZE"
+                f" | name={name or '-'}"
+                f" | availability={availability or '-'}"
+                f" | in_stock={in_stock}"
+            )
+
+            if row_is_available(row):
+
+                print(
+                    "✅ PRODUCT WITHOUT SIZE AVAILABLE"
+                )
+
+                return ["ONE SIZE"]
+
+        print(
+            "❌ PRODUCT WITHOUT SIZE UNAVAILABLE"
+        )
+
+        return []
+
+    # ========================================================
+    # ТОВАРИ З РОЗМІРАМИ
+    # ========================================================
 
     found = {}
     available_sizes = []
 
     for row in size_rows:
+
         if not isinstance(row, dict):
             continue
 
-        name = normalize_size(row.get("name"))
+        name = normalize_size(
+            row.get("name")
+        )
 
         if not name:
             continue
@@ -343,9 +489,9 @@ def check_zara(url, wanted_sizes):
         if name not in wanted_normalized:
             continue
 
-        availability = str(
-            row.get("availability") or ""
-        ).lower()
+        availability = normalize_size(
+            row.get("availability")
+        )
 
         in_stock = row.get("in_stock")
 
@@ -357,25 +503,36 @@ def check_zara(url, wanted_sizes):
             f" | in_stock={in_stock}"
         )
 
-        # ReefAPI gives a direct boolean.
-        if in_stock is True:
+        if row_is_available(row):
+
             available_sizes.append(name)
-            print(f"✅ {name} AVAILABLE")
 
-        else:
-            print(f"❌ {name} unavailable")
-
-    for size in wanted_normalized:
-        if size not in found:
             print(
-                f"⚠️ Requested size {size} "
-                f"not present in API response"
+                f"✅ {name} AVAILABLE"
             )
 
-    # Keep config order and remove duplicates.
+        else:
+
+            print(
+                f"❌ {name} unavailable"
+            )
+
+    # Якщо потрібного розміру немає у відповіді API.
+    for size in wanted_normalized:
+
+        if size not in found:
+
+            print(
+                f"⚠️ Requested size {size} "
+                "not present in API response"
+            )
+
+    # Зберігаємо порядок із config
+    # і прибираємо дублікати.
     ordered_available = []
 
     for size in wanted_normalized:
+
         if (
             size in available_sizes
             and size not in ordered_available
@@ -394,23 +551,48 @@ def check_zara(url, wanted_sizes):
     return ordered_available
 
 
+# ============================================================
+# ITEM CHECK
+# ============================================================
+
 def check_item(item, config):
-    store = item.get("store", "").lower()
+    store = item.get(
+        "store",
+        ""
+    ).lower()
+
     url = item.get("url")
-    sizes = item.get("sizes", [])
-    person = item.get("person", "Yulia")
+
+    sizes = item.get(
+        "sizes",
+        []
+    )
+
+    person = item.get(
+        "person",
+        "Yulia"
+    )
 
     if store != "zara":
-        print(f"⚠️ Unsupported store: {store}")
+
+        print(
+            f"⚠️ Unsupported store: "
+            f"{store}"
+        )
+
         return False
 
     if not url:
+
         print("⚠️ Missing URL")
         return False
 
-    print("\n" + "=" * 55)
     print(
-        f"📋 Checking ZARA "
+        "\n" + "=" * 55
+    )
+
+    print(
+        "📋 Checking ZARA "
         f"| sizes: {', '.join(sizes)}"
     )
 
@@ -420,17 +602,22 @@ def check_item(item, config):
     )
 
     if not available:
+
         print(
-            f"❌ No requested stock: "
+            "❌ No requested stock: "
             f"{', '.join(sizes)}"
         )
+
         return False
 
-    sizes_text = ", ".join(available)
+    sizes_text = ", ".join(
+        available
+    )
 
-    print(f"🎉 FOUND: {sizes_text}")
+    print(
+        f"🎉 FOUND: {sizes_text}"
+    )
 
-    # Send alert first.
     warsaw_time = datetime.now(
         ZoneInfo("Europe/Warsaw")
     ).strftime("%H:%M:%S")
@@ -444,28 +631,36 @@ def check_item(item, config):
         f"⏰ Час: <b>{warsaw_time}</b>"
     )
 
-    telegram_ok = send_telegram(message)
+    # Спочатку надсилаємо Telegram.
+    telegram_ok = send_telegram(
+        message
+    )
 
-    # Only remove after Telegram succeeds.
-    # This avoids losing an item if Telegram itself fails.
+    # Видаляємо товар із config тільки після
+    # успішного повідомлення Telegram.
     if telegram_ok:
+
         removed = remove_item_from_config(
             config,
             item
         )
 
         if removed:
+
             print(
                 "🗑️ Product removed "
                 "from tracking config"
             )
+
         else:
+
             print(
                 "⚠️ Product found, but "
                 "config removal failed"
             )
 
     else:
+
         print(
             "⚠️ Product NOT removed because "
             "Telegram notification failed"
@@ -474,14 +669,27 @@ def check_item(item, config):
     return True
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
     start = time.time()
 
-    print("🌊 REEFAPI ZARA STOCK CHECKER")
-    print(f"📄 Config: {CONFIG_FILE}")
+    print(
+        "🌊 REEFAPI ZARA STOCK CHECKER"
+    )
+
+    print(
+        f"📄 Config: {CONFIG_FILE}"
+    )
 
     if not REEF_KEY:
-        print("❌ REEF_KEY secret is missing")
+
+        print(
+            "❌ REEF_KEY secret is missing"
+        )
+
         return
 
     config = load_config()
@@ -490,11 +698,18 @@ def main():
         return
 
     items = list(
-        config.get("urls", [])
+        config.get(
+            "urls",
+            []
+        )
     )
 
     if not items:
-        print("🎯 No items in config")
+
+        print(
+            "🎯 No items in config"
+        )
+
         return
 
     checked = 0
@@ -504,6 +719,7 @@ def main():
         items,
         start=1
     ):
+
         print(
             f"\n📦 ITEM "
             f"{index}/{len(items)}"
@@ -512,6 +728,7 @@ def main():
         checked += 1
 
         try:
+
             if check_item(
                 item,
                 config
@@ -519,17 +736,34 @@ def main():
                 found += 1
 
         except Exception as e:
+
             print(
-                f"❌ Unexpected item error: {e}"
+                "❌ Unexpected item error: "
+                f"{e}"
             )
 
     elapsed = time.time() - start
 
-    print("\n" + "=" * 55)
-    print("🌊 SUMMARY")
-    print(f"✅ Checked: {checked}")
-    print(f"🛍️ Found: {found}")
-    print(f"⏱️ Total time: {elapsed:.1f} sec")
+    print(
+        "\n" + "=" * 55
+    )
+
+    print(
+        "🌊 SUMMARY"
+    )
+
+    print(
+        f"✅ Checked: {checked}"
+    )
+
+    print(
+        f"🛍️ Found: {found}"
+    )
+
+    print(
+        f"⏱️ Total time: "
+        f"{elapsed:.1f} sec"
+    )
 
 
 if __name__ == "__main__":
