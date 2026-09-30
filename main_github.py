@@ -12,6 +12,7 @@ import requests
 CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
 
 REEF_API_URL = "https://api.reefapi.com/zara/v1/product_detail"
+
 REEF_KEY = os.getenv("REEF_KEY")
 
 BOT_API = os.getenv("BOT_API")
@@ -42,279 +43,308 @@ def save_config(config):
                 ensure_ascii=False
             )
 
-        # Якщо бот працює через GitHub Actions —
-        # зберігаємо зміну config назад у репозиторій.
-        try:
+        if os.getenv("GITHUB_ACTIONS"):
+
             subprocess.run(
-                ["git", "config", "user.name", "github-actions[bot]"],
-                check=False
+                [
+                    "git",
+                    "config",
+                    "--global",
+                    "user.name",
+                    "Stock Checker Bot"
+                ],
+                check=True,
+                capture_output=True
             )
 
             subprocess.run(
                 [
                     "git",
                     "config",
+                    "--global",
                     "user.email",
-                    "41898282+github-actions[bot]@users.noreply.github.com"
+                    "actions@github.com"
                 ],
-                check=False
+                check=True,
+                capture_output=True
             )
 
             subprocess.run(
                 ["git", "add", CONFIG_FILE],
-                check=False
+                check=True,
+                capture_output=True
             )
 
-            subprocess.run(
-                [
-                    "git",
-                    "commit",
-                    "-m",
-                    f"Remove found Zara item from {CONFIG_FILE}"
-                ],
-                check=False
+            diff = subprocess.run(
+                ["git", "diff", "--staged", "--quiet"],
+                capture_output=True
             )
 
-            subprocess.run(
-                ["git", "push"],
-                check=False
-            )
+            if diff.returncode != 0:
 
-        except Exception as e:
-            print(f"⚠️ Git save warning: {e}")
+                subprocess.run(
+                    [
+                        "git",
+                        "commit",
+                        "-m",
+                        "Auto-remove found Zara item"
+                    ],
+                    check=True,
+                    capture_output=True
+                )
+
+                subprocess.run(
+                    ["git", "push"],
+                    check=True,
+                    capture_output=True
+                )
+
+                print(f"✅ {CONFIG_FILE} updated in GitHub")
+
+        return True
 
     except Exception as e:
-        print(f"❌ Config save error: {e}")
+        print(f"⚠️ Config save/push error: {e}")
+        return False
+
+
+def remove_item_from_config(config, item):
+    before = len(config.get("urls", []))
+
+    config["urls"] = [
+        x
+        for x in config.get("urls", [])
+        if (
+            isinstance(x, dict)
+            and x.get("url") != item.get("url")
+        )
+    ]
+
+    if len(config["urls"]) < before:
+        return save_config(config)
+
+    return False
 
 
 # ============================================================
 # TELEGRAM
 # ============================================================
 
-def send_telegram(text):
+def send_telegram(message):
+    if not BOT_API or not CHAT_ID:
+        print("⚠️ Telegram credentials missing")
+        return False
+
     try:
-        if not BOT_API or not CHAT_ID:
-            print("❌ BOT_API або CHAT_ID не задані")
-            return False
-
-        url = f"https://api.telegram.org/bot{BOT_API}/sendMessage"
-
         response = requests.post(
-            url,
+            f"https://api.telegram.org/bot{BOT_API}/sendMessage",
             data={
                 "chat_id": CHAT_ID,
-                "text": text,
+                "text": message,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
             },
-            timeout=20
+            timeout=15
         )
 
-        print(
-            f"📨 Telegram HTTP: "
-            f"{response.status_code}"
-        )
+        response.raise_for_status()
 
-        return response.status_code == 200
+        print("✅ Telegram message sent")
+        return True
 
     except Exception as e:
         print(f"❌ Telegram error: {e}")
         return False
 
 
+def send_error_telegram(url, reason):
+    warsaw_time = datetime.now(
+        ZoneInfo("Europe/Warsaw")
+    ).strftime("%H:%M:%S")
+
+    message = (
+        "⚠️ <b>ПОМИЛКА ПЕРЕВІРКИ ZARA</b>\n\n"
+        "Товар <b>НЕ БУВ перевірений</b>.\n"
+        f"Причина: <b>{reason}</b>\n\n"
+        f"🔗 <a href='{url}'>Відкрити товар</a>\n"
+        f"⏰ Час: <b>{warsaw_time}</b>"
+    )
+
+    send_telegram(message)
+
+
 # ============================================================
-# PRODUCT ID FROM ZARA URL
+# HELPERS
 # ============================================================
 
-def get_product_id(url):
+def normalize_size(value):
+    if value is None:
+        return ""
+
+    return (
+        str(value)
+        .replace("\n", " ")
+        .replace("\t", " ")
+        .strip()
+        .upper()
+    )
+
+
+def get_product_id_from_url(url):
     try:
-        parsed = urlparse(url)
-        query = parse_qs(parsed.query)
+        query = parse_qs(
+            urlparse(url).query
+        )
 
-        v1 = query.get("v1")
+        values = query.get("v1", [])
 
-        if v1:
-            return str(v1[0])
+        if values:
+            return str(values[0])
 
     except Exception as e:
-        print(f"❌ URL parse error: {e}")
+        print(
+            f"⚠️ Could not read v1 from URL: {e}"
+        )
 
     return None
 
 
 # ============================================================
-# REEF API
+# REEF API WITH RETRIES
 # ============================================================
 
-def get_product_detail(product_id):
+def reef_product_detail(product_id):
     if not REEF_KEY:
-        print("❌ REEF_KEY is missing")
-        return None
+        raise RuntimeError(
+            "REEF_KEY is missing"
+        )
 
-    headers = {
-        "x-api-key": REEF_KEY,
-        "Content-Type": "application/json"
-    }
+    max_attempts = 3
+    retry_delay = 5
 
-    payload = {
-        "product_id": str(product_id),
-        "market": "pl",
-        "include_composition": False,
-        "find_market": False
-    }
+    last_error = None
 
-    for attempt in range(1, 4):
+    for attempt in range(1, max_attempts + 1):
+
+        print(
+            f"🌊 ReefAPI attempt "
+            f"{attempt}/{max_attempts}"
+        )
 
         try:
-            print(
-                f"📡 ReefAPI product_detail "
-                f"attempt {attempt}/3"
-            )
-
             response = requests.post(
                 REEF_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=40
+                headers={
+                    "x-api-key": REEF_KEY,
+                    "content-type": "application/json"
+                },
+                json={
+                    "product_id": str(product_id),
+                    "market": "pl",
+                    "include_composition": False,
+                    "find_market": False
+                },
+                timeout=30
             )
 
             print(
-                f"DETAIL HTTP: "
+                "🌊 ReefAPI DETAIL HTTP: "
                 f"{response.status_code}"
             )
 
-            if response.status_code != 200:
-                print(
-                    response.text[:1000]
+            response.raise_for_status()
+
+            payload = response.json()
+
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    f"ReefAPI error: "
+                    f"{payload.get('error')}"
                 )
 
-                if attempt < 3:
-                    time.sleep(2)
+            data = payload.get("data")
 
-                continue
-
-            result = response.json()
-
-            if result.get("ok") is False:
-                print(
-                    f"❌ ReefAPI error: "
-                    f"{result}"
+            if not data:
+                raise RuntimeError(
+                    "ReefAPI returned no product data"
                 )
-                return None
-
-            data = result.get("data")
-
-            if data:
-                return data
 
             print(
-                "❌ ReefAPI returned no data"
+                f"✅ ReefAPI success "
+                f"on attempt {attempt}"
+            )
+
+            return data
+
+        except requests.exceptions.Timeout as e:
+
+            last_error = (
+                f"ReefAPI timeout: {e}"
+            )
+
+            print(
+                f"⚠️ Attempt {attempt} timed out"
+            )
+
+        except requests.HTTPError as e:
+
+            response = getattr(
+                e,
+                "response",
+                None
+            )
+
+            status = (
+                response.status_code
+                if response is not None
+                else "unknown"
+            )
+
+            last_error = (
+                f"ReefAPI HTTP error {status}"
+            )
+
+            print(
+                f"⚠️ Attempt {attempt} "
+                f"HTTP error: {status}"
             )
 
         except Exception as e:
-            print(
-                f"❌ ReefAPI exception: {e}"
+
+            last_error = (
+                f"ReefAPI error: {e}"
             )
 
-        if attempt < 3:
-            time.sleep(2)
+            print(
+                f"⚠️ Attempt {attempt} failed: "
+                f"{e}"
+            )
 
-    return None
+        if attempt < max_attempts:
+
+            print(
+                f"⏳ Waiting {retry_delay} sec "
+                "before retry..."
+            )
+
+            time.sleep(
+                retry_delay
+            )
+
+    raise RuntimeError(
+        last_error
+        or "ReefAPI failed after 3 attempts"
+    )
 
 
 # ============================================================
-# STOCK HELPERS
+# ZARA DATA
 # ============================================================
 
-def normalize_status(value):
-    return str(value or "").upper()
+def find_matching_color(data, wanted_product_id):
 
-
-def status_is_available(value):
-    status = normalize_status(value)
-
-    return status in {
-        "AVAILABLE",
-        "IN_STOCK",
-        "LOW_STOCK"
-    }
-
-
-def size_is_available(size):
-    if size.get("in_stock") is True:
-        return True
-
-    if status_is_available(
-        size.get("availability")
-    ):
-        return True
-
-    return False
-
-
-def get_all_sizes(data):
-    sizes = []
-
-    # ReefAPI може повертати кольори
-    colors = data.get("colors")
-
-    if isinstance(colors, list):
-        for color in colors:
-            color_sizes = color.get("sizes")
-
-            if isinstance(color_sizes, list):
-                sizes.extend(color_sizes)
-
-    # Або selected_color
-    selected_color = data.get("selected_color")
-
-    if isinstance(selected_color, dict):
-        color_sizes = selected_color.get("sizes")
-
-        if isinstance(color_sizes, list):
-            sizes.extend(color_sizes)
-
-    # Або sizes напряму
-    direct_sizes = data.get("sizes")
-
-    if isinstance(direct_sizes, list):
-        sizes.extend(direct_sizes)
-
-    return sizes
-
-
-def get_available_sizes(data):
-    available = []
-
-    for size in get_all_sizes(data):
-
-        if not size_is_available(size):
-            continue
-
-        size_name = (
-            size.get("name")
-            or size.get("size")
-            or size.get("label")
-            or size.get("description")
-        )
-
-        if size_name:
-            size_name = str(size_name)
-
-            if size_name not in available:
-                available.append(size_name)
-
-    return available
-
-
-def product_is_available(data):
-    if data.get("in_stock") is True:
-        return True
-
-    if status_is_available(
-        data.get("availability")
-    ):
-        return True
+    if not isinstance(data, dict):
+        return None
 
     selected_color = data.get(
         "selected_color"
@@ -322,125 +352,543 @@ def product_is_available(data):
 
     if isinstance(selected_color, dict):
 
-        if selected_color.get(
-            "in_stock"
-        ) is True:
-            return True
+        selected_product_id = (
+            selected_color.get("product_id")
+        )
 
-        if status_is_available(
-            selected_color.get(
-                "availability"
-            )
+        if (
+            selected_product_id is None
+            or str(selected_product_id)
+            == str(wanted_product_id)
         ):
-            return True
+            return selected_color
 
-    available_sizes = (
-        get_available_sizes(data)
+    colors = data.get("colors")
+
+    if isinstance(colors, list):
+
+        for color in colors:
+
+            if not isinstance(color, dict):
+                continue
+
+            color_product_id = (
+                color.get("product_id")
+            )
+
+            if (
+                color_product_id is not None
+                and str(color_product_id)
+                == str(wanted_product_id)
+            ):
+                return color
+
+        if (
+            len(colors) == 1
+            and isinstance(colors[0], dict)
+        ):
+            return colors[0]
+
+    if isinstance(
+        data.get("sizes"),
+        list
+    ):
+        return data
+
+    return None
+
+
+def get_size_rows(data, product_id):
+
+    color = find_matching_color(
+        data,
+        product_id
     )
 
-    if available_sizes:
+    if color:
+
+        sizes = color.get("sizes")
+
+        if isinstance(sizes, list):
+            return sizes
+
+    def walk(obj):
+
+        if isinstance(obj, dict):
+
+            if isinstance(
+                obj.get("sizes"),
+                list
+            ):
+
+                obj_product_id = (
+                    obj.get("product_id")
+                )
+
+                if (
+                    obj_product_id is None
+                    or str(obj_product_id)
+                    == str(product_id)
+                ):
+                    return obj["sizes"]
+
+            for value in obj.values():
+
+                result = walk(value)
+
+                if result is not None:
+                    return result
+
+        elif isinstance(obj, list):
+
+            for value in obj:
+
+                result = walk(value)
+
+                if result is not None:
+                    return result
+
+        return None
+
+    result = walk(data)
+
+    if result is None:
+        return []
+
+    return result
+
+
+# ============================================================
+# AVAILABILITY
+# ============================================================
+
+def row_is_available(row):
+
+    if not isinstance(row, dict):
+        return False
+
+    in_stock = row.get("in_stock")
+
+    if in_stock is True:
         return True
 
-    return False
+    availability = normalize_size(
+        row.get("availability")
+    )
+
+    available_values = {
+        "AVAILABLE",
+        "IN_STOCK",
+        "IN STOCK",
+        "LOW_ON_STOCK",
+        "LOW ON STOCK",
+        "LOW_STOCK"
+    }
+
+    return availability in available_values
 
 
 # ============================================================
-# CHECK PRODUCT
+# CHECK ZARA
 # ============================================================
 
-def check_product(item):
-    url = item.get("url", "")
-    wanted_sizes = item.get(
+def check_zara(url, wanted_sizes):
+
+    print(f"🌐 {url}")
+
+    product_id = get_product_id_from_url(
+        url
+    )
+
+    if not product_id:
+
+        print(
+            "❌ ERROR: URL has no v1"
+        )
+
+        send_error_telegram(
+            url,
+            "в URL немає v1 / product_id"
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
+
+    print(
+        "✅ v1 FOUND IN URL"
+    )
+
+    print(
+        f"🆔 Product ID: {product_id}"
+    )
+
+    print(
+        "🚀 Search skipped — "
+        "checking this exact product"
+    )
+
+    try:
+
+        data = reef_product_detail(
+            product_id
+        )
+
+    except Exception as e:
+
+        print(
+            f"❌ ReefAPI failed after retries: {e}"
+        )
+
+        send_error_telegram(
+            url,
+            str(e)
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
+
+    print(
+        "✅ Exact product data received"
+    )
+
+    size_rows = get_size_rows(
+        data,
+        product_id
+    )
+
+    print(
+        f"📦 Stock rows received: "
+        f"{len(size_rows)}"
+    )
+
+    if not size_rows:
+
+        print(
+            "❌ No stock rows received"
+        )
+
+        send_error_telegram(
+            url,
+            "API не повернув stock rows"
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
+
+    wanted_normalized = [
+        normalize_size(size)
+        for size in wanted_sizes
+        if normalize_size(size)
+    ]
+
+    # ========================================================
+    # BAG / ONE SIZE
+    # ========================================================
+
+    if not wanted_normalized:
+
+        print(
+            "👜 PRODUCT WITHOUT SIZE"
+        )
+
+        for row in size_rows:
+
+            if not isinstance(row, dict):
+                continue
+
+            name = normalize_size(
+                row.get("name")
+            )
+
+            availability = normalize_size(
+                row.get("availability")
+            )
+
+            in_stock = row.get(
+                "in_stock"
+            )
+
+            print(
+                "👜 STOCK"
+                f" | name={name or '-'}"
+                f" | availability={availability or '-'}"
+                f" | in_stock={in_stock}"
+            )
+
+            if row_is_available(row):
+
+                print(
+                    "🎉 BAG IS AVAILABLE!"
+                )
+
+                return {
+                    "checked_ok": True,
+                    "available": ["ONE SIZE"]
+                }
+
+        print(
+            "❌ BAG CURRENTLY UNAVAILABLE"
+        )
+
+        return {
+            "checked_ok": True,
+            "available": []
+        }
+
+    # ========================================================
+    # CLOTHES / SIZES
+    # ========================================================
+
+    found = {}
+    available_sizes = []
+
+    for row in size_rows:
+
+        if not isinstance(row, dict):
+            continue
+
+        name = normalize_size(
+            row.get("name")
+        )
+
+        if not name:
+            continue
+
+        if name not in wanted_normalized:
+            continue
+
+        availability = normalize_size(
+            row.get("availability")
+        )
+
+        in_stock = row.get(
+            "in_stock"
+        )
+
+        found[name] = True
+
+        print(
+            f"📏 {name}"
+            f" | availability={availability}"
+            f" | in_stock={in_stock}"
+        )
+
+        if row_is_available(row):
+
+            available_sizes.append(
+                name
+            )
+
+            print(
+                f"✅ {name} AVAILABLE"
+            )
+
+        else:
+
+            print(
+                f"❌ {name} unavailable"
+            )
+
+    for size in wanted_normalized:
+
+        if size not in found:
+
+            print(
+                f"⚠️ Size {size} "
+                "not present in API response"
+            )
+
+    ordered_available = []
+
+    for size in wanted_normalized:
+
+        if (
+            size in available_sizes
+            and size not in ordered_available
+        ):
+
+            ordered_available.append(
+                size
+            )
+
+    print(
+        "🟢 AVAILABLE: "
+        + (
+            ", ".join(
+                ordered_available
+            )
+            if ordered_available
+            else "NONE"
+        )
+    )
+
+    return {
+        "checked_ok": True,
+        "available": ordered_available
+    }
+
+
+# ============================================================
+# CHECK ITEM
+# ============================================================
+
+def check_item(item, config):
+
+    if not isinstance(item, dict):
+
+        print(
+            "❌ Config item must be an object"
+        )
+
+        return {
+            "checked_ok": False,
+            "found": False
+        }
+
+    store = item.get(
+        "store",
+        ""
+    ).lower()
+
+    url = item.get("url")
+
+    sizes = item.get(
         "sizes",
         []
     )
 
-    print("")
-    print("=" * 60)
-    print(f"🔍 Checking:")
-    print(url)
+    person = item.get(
+        "person",
+        "Yulia"
+    )
 
-    product_id = get_product_id(url)
+    if store != "zara":
 
-    if not product_id:
         print(
-            "❌ Не знайдено v1= у URL"
+            f"⚠️ Unsupported store: {store}"
         )
-        return False, []
+
+        return {
+            "checked_ok": False,
+            "found": False
+        }
+
+    if not url:
+
+        print(
+            "⚠️ Missing URL"
+        )
+
+        return {
+            "checked_ok": False,
+            "found": False
+        }
 
     print(
-        f"🆔 Product ID: "
-        f"{product_id}"
-    )
-
-    data = get_product_detail(
-        product_id
-    )
-
-    if not data:
-        return False, []
-
-    available_sizes = (
-        get_available_sizes(data)
-    )
-
-    print(
-        f"📦 availability: "
-        f"{data.get('availability')}"
+        "\n" + "=" * 55
     )
 
     print(
-        f"📦 in_stock: "
-        f"{data.get('in_stock')}"
+        "📋 Checking ZARA POLSKA"
     )
 
     print(
-        f"📏 Available sizes: "
-        f"{available_sizes}"
+        f"📏 Requested sizes: "
+        f"{', '.join(sizes) if sizes else 'ONE SIZE'}"
     )
 
-    # ========================================================
-    # СУМКИ / ТОВАР БЕЗ РОЗМІРУ
-    # ========================================================
+    result = check_zara(
+        url,
+        sizes
+    )
 
-    if not wanted_sizes:
+    if not result["checked_ok"]:
 
-        if product_is_available(data):
-            print("🎉 FOUND")
-            return True, available_sizes
+        print(
+            "⚠️ ITEM CHECK FAILED"
+        )
 
-        print("❌ Not available")
-        return False, []
+        return {
+            "checked_ok": False,
+            "found": False
+        }
 
-    # ========================================================
-    # ОДЯГ З РОЗМІРАМИ
-    # ========================================================
+    available = result["available"]
 
-    wanted = {
-        str(x).strip().upper()
-        for x in wanted_sizes
+    if not available:
+
+        print(
+            "❌ No requested stock"
+        )
+
+        return {
+            "checked_ok": True,
+            "found": False
+        }
+
+    sizes_text = ", ".join(
+        available
+    )
+
+    print(
+        f"🎉 FOUND: {sizes_text}"
+    )
+
+    warsaw_time = datetime.now(
+        ZoneInfo("Europe/Warsaw")
+    ).strftime("%H:%M:%S")
+
+    message = (
+        "🛍️ <b>ТОВАР З'ЯВИВСЯ!</b>\n\n"
+        f"👤 <b>{person}</b>\n"
+        f"📏 Розмір: <b>{sizes_text}</b>\n"
+        "🏪 Магазин: <b>ZARA POLSKA</b>\n"
+        f"🔗 <a href='{url}'>Відкрити товар</a>\n"
+        f"⏰ Час: <b>{warsaw_time}</b>"
+    )
+
+    telegram_ok = send_telegram(
+        message
+    )
+
+    if telegram_ok:
+
+        removed = remove_item_from_config(
+            config,
+            item
+        )
+
+        if removed:
+
+            print(
+                "🗑️ Product removed "
+                "from tracking config"
+            )
+
+        else:
+
+            print(
+                "⚠️ Product found, but "
+                "config removal failed"
+            )
+
+    else:
+
+        print(
+            "⚠️ Product NOT removed because "
+            "Telegram failed"
+        )
+
+    return {
+        "checked_ok": True,
+        "found": True
     }
-
-    matching_sizes = []
-
-    for size in available_sizes:
-
-        if str(size).strip().upper() in wanted:
-            matching_sizes.append(size)
-
-    if matching_sizes:
-        print(
-            f"🎉 FOUND sizes: "
-            f"{matching_sizes}"
-        )
-
-        return True, matching_sizes
-
-    print(
-        "❌ Потрібного розміру немає"
-    )
-
-    return False, []
 
 
 # ============================================================
@@ -448,113 +896,120 @@ def check_product(item):
 # ============================================================
 
 def main():
-    print("")
-    print("=" * 60)
-    print("⚡ ZARA STOCK CHECKER")
+
+    start = time.time()
+
     print(
-        f"📄 CONFIG_FILE: "
-        f"{CONFIG_FILE}"
+        "🌊 REEFAPI ZARA POLAND STOCK CHECKER"
     )
+
     print(
-        f"🕐 "
-        f"{datetime.now(ZoneInfo('Europe/Warsaw'))}"
+        f"📄 Config: {CONFIG_FILE}"
     )
-    print("=" * 60)
+
+    if not REEF_KEY:
+
+        print(
+            "❌ REEF_KEY secret is missing"
+        )
+
+        return
 
     config = load_config()
 
     if not config:
         return
 
-    items = config.get(
-        "urls",
-        []
+    items = list(
+        config.get(
+            "urls",
+            []
+        )
     )
 
     if not items:
-        print("ℹ️ Немає товарів")
-        return
-
-    remaining_items = []
-
-    for item in items:
-
-        found, sizes = check_product(
-            item
-        )
-
-        if found:
-
-            url = item.get(
-                "url",
-                ""
-            )
-
-            person = item.get(
-                "person",
-                "Yulia"
-            )
-
-            message = (
-                "🚨 <b>ZARA Є В НАЯВНОСТІ!</b>\n\n"
-                f"👤 {person}\n"
-            )
-
-            if sizes:
-                message += (
-                    "📏 Розміри: "
-                    + ", ".join(sizes)
-                    + "\n"
-                )
-
-            message += (
-                f"\n🔗 {url}"
-            )
-
-            sent = send_telegram(
-                message
-            )
-
-            if sent:
-                print(
-                    "✅ Telegram sent — "
-                    "removing item"
-                )
-
-                # Не додаємо назад =
-                # товар видаляється з config
-
-            else:
-                print(
-                    "⚠️ Telegram failed — "
-                    "keeping item"
-                )
-
-                remaining_items.append(
-                    item
-                )
-
-        else:
-            remaining_items.append(
-                item
-            )
-
-    if len(remaining_items) != len(items):
-
-        config["urls"] = (
-            remaining_items
-        )
-
-        save_config(
-            config
-        )
 
         print(
-            "💾 Config updated"
+            "🎯 No items in config"
         )
 
-    print("")
-    print("✅ Check finished")
+        return
+
+    checked_ok = 0
+    errors = 0
+    found = 0
+
+    for index, item in enumerate(
+        items,
+        start=1
+    ):
+
+        print(
+            f"\n📦 ITEM "
+            f"{index}/{len(items)}"
+        )
+
+        try:
+
+            result = check_item(
+                item,
+                config
+            )
+
+            if result["checked_ok"]:
+                checked_ok += 1
+            else:
+                errors += 1
+
+            if result["found"]:
+                found += 1
+
+        except Exception as e:
+
+            errors += 1
+
+            print(
+                "❌ Unexpected item error: "
+                f"{e}"
+            )
+
+            url = ""
+
+            if isinstance(item, dict):
+                url = item.get("url", "")
+
+            if url:
+                send_error_telegram(
+                    url,
+                    f"Unexpected error: {e}"
+                )
+
+    elapsed = time.time() - start
+
+    print(
+        "\n" + "=" * 55
+    )
+
+    print(
+        "🌊 SUMMARY"
+    )
+
+    print(
+        f"✅ Successfully checked: {checked_ok}"
+    )
+
+    print(
+        f"⚠️ Errors: {errors}"
+    )
+
+    print(
+        f"🛍️ Found: {found}"
+    )
+
+    print(
+        f"⏱️ Total time: "
+        f"{elapsed:.1f} sec"
+    )
 
 
 if __name__ == "__main__":
