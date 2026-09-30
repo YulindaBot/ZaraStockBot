@@ -45,8 +45,6 @@ def save_config(config):
                 ensure_ascii=False
             )
 
-        # Якщо бот працює через GitHub Actions —
-        # записуємо зміни назад у репозиторій.
         if os.getenv("GITHUB_ACTIONS"):
 
             subprocess.run(
@@ -190,12 +188,6 @@ def normalize_reference(value):
 
 
 def get_product_id_from_url(url):
-    """
-    Якщо URL вже містить:
-    ?v1=545893127
-
-    повертаємо цей product_id.
-    """
     try:
         query = parse_qs(
             urlparse(url).query
@@ -213,17 +205,6 @@ def get_product_id_from_url(url):
 
 
 def get_zara_reference_from_url(url):
-    """
-    Приклади:
-
-    p16102810.html -> 1610/281
-    p16821710.html -> 1682/171
-    p04575567.html -> 4575/567
-
-    Остання цифра короткого Zara-коду
-    не входить у display_reference.
-    """
-
     try:
         path = urlparse(url).path
 
@@ -238,12 +219,9 @@ def get_zara_reference_from_url(url):
 
         code = match.group(1)
 
-        # Zara іноді має початковий 0
         if len(code) == 8 and code.startswith("0"):
             code = code[1:]
 
-        # Наприклад:
-        # 16102810 -> 1610/281
         if len(code) >= 7:
             article = code[:4]
             model = code[4:7]
@@ -264,10 +242,8 @@ def get_zara_reference_from_url(url):
 def reef_search_product_id(url):
     """
     Якщо короткий URL Zara не містить ?v1=,
-    шукаємо товар у Zara Polska за reference,
-    наприклад 1610/281.
-
-    Search повертає справжній product_id.
+    пробуємо знайти точний товар у Zara Polska
+    за артикулом, наприклад 1610/281.
     """
 
     reference = get_zara_reference_from_url(url)
@@ -279,141 +255,183 @@ def reef_search_product_id(url):
         )
         return None
 
+    reference_digits = normalize_reference(reference)
+
+    queries = [
+        reference,
+        reference.replace("/", " "),
+        reference_digits
+    ]
+
     print(
-        f"🔎 Searching Zara Polska: {reference}"
+        f"🔎 Looking for exact Zara reference: "
+        f"{reference}"
     )
 
-    try:
-        response = requests.post(
-            REEF_SEARCH_URL,
-            headers={
-                "x-api-key": REEF_KEY,
-                "content-type": "application/json"
-            },
-            json={
-                "query": reference,
-                "market": "pl",
-                "max_results": 40
-            },
-            timeout=30
-        )
+    for query in queries:
 
         print(
-            "🌊 ReefAPI SEARCH HTTP: "
-            f"{response.status_code}"
+            f"🔍 ReefAPI query: {query}"
         )
 
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                REEF_SEARCH_URL,
+                headers={
+                    "x-api-key": REEF_KEY,
+                    "content-type": "application/json"
+                },
+                json={
+                    "query": query,
+                    "market": "pl",
+                    "max_results": 200
+                },
+                timeout=30
+            )
 
-        payload = response.json()
+            print(
+                "🌊 ReefAPI SEARCH HTTP: "
+                f"{response.status_code}"
+            )
 
-    except requests.HTTPError as e:
-        response = getattr(
-            e,
-            "response",
-            None
-        )
+            response.raise_for_status()
 
-        print("❌ ReefAPI search HTTP error")
+            payload = response.json()
 
-        if response is not None:
-            try:
-                print(response.text[:1500])
-            except Exception:
-                pass
+        except requests.HTTPError as e:
 
-        return None
+            response = getattr(
+                e,
+                "response",
+                None
+            )
 
-    except Exception as e:
-        print(
-            f"❌ ReefAPI search request error: {e}"
-        )
-        return None
+            print(
+                "❌ ReefAPI search HTTP error"
+            )
 
-    if not payload.get("ok"):
-        print(
-            "❌ ReefAPI search returned error: "
-            f"{payload.get('error')}"
-        )
-        return None
+            if response is not None:
+                try:
+                    print(
+                        response.text[:1500]
+                    )
+                except Exception:
+                    pass
 
-    data = payload.get("data") or {}
-
-    results = data.get("results") or []
-
-    print(
-        f"🔎 Search rows received: {len(results)}"
-    )
-
-    wanted = normalize_reference(reference)
-
-    # --------------------------------------------------------
-    # 1. Шукаємо точний display_reference
-    # --------------------------------------------------------
-
-    for row in results:
-
-        if not isinstance(row, dict):
             continue
 
-        display_reference = normalize_reference(
-            row.get("display_reference")
-        )
+        except Exception as e:
 
-        if display_reference == wanted:
+            print(
+                f"❌ ReefAPI search request error: "
+                f"{e}"
+            )
 
-            product_id = row.get("product_id")
-
-            if product_id:
-
-                print(
-                    "✅ Exact Zara product found"
-                )
-
-                print(
-                    f"🆔 product_id: {product_id}"
-                )
-
-                print(
-                    "🏷️ display_reference: "
-                    f"{row.get('display_reference')}"
-                )
-
-                return str(product_id)
-
-    # --------------------------------------------------------
-    # 2. Додаткова перевірка reference
-    # --------------------------------------------------------
-
-    for row in results:
-
-        if not isinstance(row, dict):
             continue
 
-        full_reference = normalize_reference(
-            row.get("reference")
+        if not payload.get("ok"):
+
+            print(
+                "❌ ReefAPI search returned error: "
+                f"{payload.get('error')}"
+            )
+
+            continue
+
+        data = payload.get("data") or {}
+        results = data.get("results") or []
+
+        print(
+            f"🔎 Search rows received: "
+            f"{len(results)}"
         )
 
-        if wanted and wanted in full_reference:
+        for row in results:
 
-            product_id = row.get("product_id")
+            if not isinstance(row, dict):
+                continue
 
-            if product_id:
+            display_reference_raw = (
+                row.get("display_reference")
+            )
 
-                print(
-                    "✅ Zara product matched "
-                    "by full reference"
+            display_reference = normalize_reference(
+                display_reference_raw
+            )
+
+            if (
+                display_reference
+                == reference_digits
+            ):
+
+                product_id = row.get(
+                    "product_id"
                 )
 
-                print(
-                    f"🆔 product_id: {product_id}"
+                if product_id:
+
+                    print(
+                        "✅ EXACT ZARA PRODUCT FOUND"
+                    )
+
+                    print(
+                        "🏷️ display_reference: "
+                        f"{display_reference_raw}"
+                    )
+
+                    print(
+                        f"🆔 product_id: "
+                        f"{product_id}"
+                    )
+
+                    return str(product_id)
+
+        for row in results:
+
+            if not isinstance(row, dict):
+                continue
+
+            full_reference_raw = (
+                row.get("reference")
+            )
+
+            full_reference = normalize_reference(
+                full_reference_raw
+            )
+
+            if (
+                reference_digits
+                and reference_digits
+                in full_reference
+            ):
+
+                product_id = row.get(
+                    "product_id"
                 )
 
-                return str(product_id)
+                if product_id:
+
+                    print(
+                        "✅ ZARA PRODUCT FOUND "
+                        "BY FULL REFERENCE"
+                    )
+
+                    print(
+                        "🏷️ reference: "
+                        f"{full_reference_raw}"
+                    )
+
+                    print(
+                        f"🆔 product_id: "
+                        f"{product_id}"
+                    )
+
+                    return str(product_id)
 
     print(
-        "❌ Exact Zara product not found "
-        "in Polish search results"
+        "❌ Exact Zara product "
+        f"{reference} not found "
+        "in Zara Polska catalogue"
     )
 
     return None
@@ -471,11 +489,6 @@ def find_matching_color(data, wanted_product_id):
     if not isinstance(data, dict):
         return None
 
-    # --------------------------------------------------------
-    # ReefAPI current response:
-    # selected_color
-    # --------------------------------------------------------
-
     selected_color = data.get(
         "selected_color"
     )
@@ -493,11 +506,6 @@ def find_matching_color(data, wanted_product_id):
             == str(wanted_product_id)
         ):
             return selected_color
-
-    # --------------------------------------------------------
-    # Інший можливий формат:
-    # colors[]
-    # --------------------------------------------------------
 
     colors = data.get("colors")
 
@@ -526,10 +534,6 @@ def find_matching_color(data, wanted_product_id):
         ):
             return colors[0]
 
-    # --------------------------------------------------------
-    # sizes можуть бути прямо в data
-    # --------------------------------------------------------
-
     if isinstance(
         data.get("sizes"),
         list
@@ -551,10 +555,6 @@ def get_size_rows(data, product_id):
 
         if isinstance(sizes, list):
             return sizes
-
-    # --------------------------------------------------------
-    # Рекурсивний fallback
-    # --------------------------------------------------------
 
     def walk(obj):
 
@@ -639,11 +639,6 @@ def row_is_available(row):
 def check_zara(url, wanted_sizes):
     print(f"🌐 {url}")
 
-    # --------------------------------------------------------
-    # Якщо є ?v1= — беремо product_id прямо з URL.
-    # Інакше автоматично шукаємо його через ReefAPI Search.
-    # --------------------------------------------------------
-
     product_id = get_product_id_from_url(
         url
     )
@@ -673,10 +668,6 @@ def check_zara(url, wanted_sizes):
             )
 
             return []
-
-    # --------------------------------------------------------
-    # Product detail
-    # --------------------------------------------------------
 
     try:
         data = reef_product_detail(
@@ -741,10 +732,6 @@ def check_zara(url, wanted_sizes):
         if normalize_size(size)
     ]
 
-    # ========================================================
-    # СУМКА / ТОВАР БЕЗ РОЗМІРУ
-    # ========================================================
-
     if not wanted_normalized:
 
         print(
@@ -799,10 +786,6 @@ def check_zara(url, wanted_sizes):
         )
 
         return []
-
-    # ========================================================
-    # ТОВАРИ З РОЗМІРАМИ
-    # ========================================================
 
     found = {}
     available_sizes = []
@@ -983,8 +966,6 @@ def check_item(item, config):
         message
     )
 
-    # Видаляємо товар тільки після
-    # успішного Telegram повідомлення
     if telegram_ok:
 
         removed = remove_item_from_config(
