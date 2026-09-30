@@ -13,7 +13,6 @@ import requests
 CONFIG_FILE = os.getenv("CONFIG_FILE", "config1.json")
 
 REEF_API_URL = "https://api.reefapi.com/zara/v1/product_detail"
-REEF_SEARCH_URL = "https://api.reefapi.com/zara/v1/search"
 
 REEF_KEY = os.getenv("REEF_KEY")
 
@@ -159,6 +158,22 @@ def send_telegram(message):
         return False
 
 
+def send_error_telegram(url, reason):
+    warsaw_time = datetime.now(
+        ZoneInfo("Europe/Warsaw")
+    ).strftime("%H:%M:%S")
+
+    message = (
+        "⚠️ <b>ПОМИЛКА ПЕРЕВІРКИ ZARA</b>\n\n"
+        "Товар <b>НЕ БУВ перевірений</b>.\n"
+        f"Причина: <b>{reason}</b>\n\n"
+        f"🔗 <a href='{url}'>Відкрити товар</a>\n"
+        f"⏰ Час: <b>{warsaw_time}</b>"
+    )
+
+    send_telegram(message)
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -176,26 +191,7 @@ def normalize_size(value):
     )
 
 
-def normalize_reference(value):
-    if value is None:
-        return ""
-
-    return re.sub(
-        r"[^0-9]",
-        "",
-        str(value)
-    )
-
-
 def get_product_id_from_url(url):
-    """
-    Наприклад:
-    ?v1=545447676
-
-    повертає:
-    545447676
-    """
-
     try:
         query = parse_qs(
             urlparse(url).query
@@ -214,142 +210,8 @@ def get_product_id_from_url(url):
     return None
 
 
-def get_zara_reference_from_url(url):
-    """
-    Наприклад:
-    p16102810.html -> 1610/281
-    """
-
-    try:
-        path = urlparse(url).path
-
-        match = re.search(
-            r"-p(\d+)\.html",
-            path,
-            re.IGNORECASE
-        )
-
-        if not match:
-            return None
-
-        code = match.group(1)
-
-        if len(code) == 8 and code.startswith("0"):
-            code = code[1:]
-
-        if len(code) >= 7:
-            article = code[:4]
-            model = code[4:7]
-
-            return f"{article}/{model}"
-
-        return None
-
-    except Exception:
-        return None
-
-
 # ============================================================
-# FALLBACK SEARCH
-# ============================================================
-
-def reef_search_product_id(url):
-    """
-    Використовується ТІЛЬКИ якщо в URL немає ?v1=
-    """
-
-    reference = get_zara_reference_from_url(url)
-
-    if not reference:
-        print(
-            "❌ URL has no v1 and reference "
-            "could not be extracted"
-        )
-        return None
-
-    print(
-        f"🔎 Fallback search: {reference}"
-    )
-
-    try:
-        response = requests.post(
-            REEF_SEARCH_URL,
-            headers={
-                "x-api-key": REEF_KEY,
-                "content-type": "application/json"
-            },
-            json={
-                "query": reference,
-                "market": "pl",
-                "max_results": 40
-            },
-            timeout=30
-        )
-
-        print(
-            "🌊 ReefAPI SEARCH HTTP: "
-            f"{response.status_code}"
-        )
-
-        response.raise_for_status()
-
-        payload = response.json()
-
-    except Exception as e:
-        print(
-            f"❌ ReefAPI search error: {e}"
-        )
-        return None
-
-    if not payload.get("ok"):
-        print(
-            "❌ ReefAPI search returned error"
-        )
-        return None
-
-    data = payload.get("data") or {}
-    results = data.get("results") or []
-
-    wanted = normalize_reference(reference)
-
-    print(
-        f"🔎 Search rows received: {len(results)}"
-    )
-
-    for row in results:
-
-        if not isinstance(row, dict):
-            continue
-
-        display_reference = normalize_reference(
-            row.get("display_reference")
-        )
-
-        if display_reference == wanted:
-
-            product_id = row.get("product_id")
-
-            if product_id:
-
-                print(
-                    "✅ Exact Zara product found"
-                )
-
-                print(
-                    f"🆔 product_id: {product_id}"
-                )
-
-                return str(product_id)
-
-    print(
-        "❌ Exact product not found by fallback search"
-    )
-
-    return None
-
-
-# ============================================================
-# REEF API PRODUCT DETAIL
+# REEF API
 # ============================================================
 
 def reef_product_detail(product_id):
@@ -384,13 +246,9 @@ def reef_product_detail(product_id):
     payload = response.json()
 
     if not payload.get("ok"):
-
-        print(
-            "❌ ReefAPI detail returned error: "
-            f"{payload.get('error')}"
+        raise RuntimeError(
+            f"ReefAPI error: {payload.get('error')}"
         )
-
-        return None
 
     return payload.get("data")
 
@@ -554,50 +412,38 @@ def check_zara(url, wanted_sizes):
 
     print(f"🌐 {url}")
 
-    # ========================================================
-    # СПОЧАТКУ БЕРЕМО v1 ПРЯМО З URL
-    # ========================================================
-
     product_id = get_product_id_from_url(
         url
     )
 
-    if product_id:
+    if not product_id:
 
         print(
-            "✅ v1 FOUND IN URL"
+            "❌ ERROR: URL has no v1"
         )
 
-        print(
-            f"🆔 Product ID: {product_id}"
+        send_error_telegram(
+            url,
+            "в URL немає v1 / product_id"
         )
 
-        print(
-            "🚀 Search skipped — "
-            "checking this exact product"
-        )
+        return {
+            "checked_ok": False,
+            "available": []
+        }
 
-    else:
+    print(
+        "✅ v1 FOUND IN URL"
+    )
 
-        print(
-            "⚠️ No v1 in URL"
-        )
+    print(
+        f"🆔 Product ID: {product_id}"
+    )
 
-        product_id = reef_search_product_id(
-            url
-        )
-
-        if not product_id:
-
-            print(
-                "❌ Could not resolve product_id"
-            )
-
-            return []
-
-    # ========================================================
-    # PRODUCT DETAIL
-    # ========================================================
+    print(
+        "🚀 Search skipped — "
+        "checking this exact product"
+    )
 
     try:
 
@@ -613,30 +459,41 @@ def check_zara(url, wanted_sizes):
             None
         )
 
-        if response is not None:
+        status = (
+            response.status_code
+            if response is not None
+            else "unknown"
+        )
 
-            print(
-                "❌ ReefAPI DETAIL HTTP error: "
-                f"{response.status_code}"
-            )
+        print(
+            f"❌ ReefAPI HTTP error: {status}"
+        )
 
-            try:
-                print(
-                    response.text[:1500]
-                )
-            except Exception:
-                pass
+        send_error_telegram(
+            url,
+            f"ReefAPI HTTP error {status}"
+        )
 
-        return []
+        return {
+            "checked_ok": False,
+            "available": []
+        }
 
     except Exception as e:
 
         print(
-            "❌ ReefAPI detail error: "
-            f"{e}"
+            f"❌ ReefAPI detail error: {e}"
         )
 
-        return []
+        send_error_telegram(
+            url,
+            f"ReefAPI error: {e}"
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
 
     if not data:
 
@@ -644,7 +501,15 @@ def check_zara(url, wanted_sizes):
             "❌ No product data received"
         )
 
-        return []
+        send_error_telegram(
+            url,
+            "API не повернув дані товару"
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
 
     print(
         "✅ Exact product data received"
@@ -659,6 +524,22 @@ def check_zara(url, wanted_sizes):
         f"📦 Stock rows received: "
         f"{len(size_rows)}"
     )
+
+    if not size_rows:
+
+        print(
+            "❌ No stock rows received"
+        )
+
+        send_error_telegram(
+            url,
+            "API не повернув stock rows"
+        )
+
+        return {
+            "checked_ok": False,
+            "available": []
+        }
 
     wanted_normalized = [
         normalize_size(size)
@@ -675,14 +556,6 @@ def check_zara(url, wanted_sizes):
         print(
             "👜 PRODUCT WITHOUT SIZE"
         )
-
-        if not size_rows:
-
-            print(
-                "❌ No stock information received"
-            )
-
-            return []
 
         for row in size_rows:
 
@@ -714,13 +587,19 @@ def check_zara(url, wanted_sizes):
                     "🎉 BAG IS AVAILABLE!"
                 )
 
-                return ["ONE SIZE"]
+                return {
+                    "checked_ok": True,
+                    "available": ["ONE SIZE"]
+                }
 
         print(
             "❌ BAG CURRENTLY UNAVAILABLE"
         )
 
-        return []
+        return {
+            "checked_ok": True,
+            "available": []
+        }
 
     # ========================================================
     # CLOTHES / SIZES
@@ -809,7 +688,10 @@ def check_zara(url, wanted_sizes):
         )
     )
 
-    return ordered_available
+    return {
+        "checked_ok": True,
+        "available": ordered_available
+    }
 
 
 # ============================================================
@@ -824,7 +706,10 @@ def check_item(item, config):
             "❌ Config item must be an object"
         )
 
-        return False
+        return {
+            "checked_ok": False,
+            "found": False
+        }
 
     store = item.get(
         "store",
@@ -849,7 +734,10 @@ def check_item(item, config):
             f"⚠️ Unsupported store: {store}"
         )
 
-        return False
+        return {
+            "checked_ok": False,
+            "found": False
+        }
 
     if not url:
 
@@ -857,7 +745,10 @@ def check_item(item, config):
             "⚠️ Missing URL"
         )
 
-        return False
+        return {
+            "checked_ok": False,
+            "found": False
+        }
 
     print(
         "\n" + "=" * 55
@@ -872,10 +763,23 @@ def check_item(item, config):
         f"{', '.join(sizes) if sizes else 'ONE SIZE'}"
     )
 
-    available = check_zara(
+    result = check_zara(
         url,
         sizes
     )
+
+    if not result["checked_ok"]:
+
+        print(
+            "⚠️ ITEM CHECK FAILED"
+        )
+
+        return {
+            "checked_ok": False,
+            "found": False
+        }
+
+    available = result["available"]
 
     if not available:
 
@@ -883,7 +787,10 @@ def check_item(item, config):
             "❌ No requested stock"
         )
 
-        return False
+        return {
+            "checked_ok": True,
+            "found": False
+        }
 
     sizes_text = ", ".join(
         available
@@ -938,7 +845,10 @@ def check_item(item, config):
             "Telegram failed"
         )
 
-    return True
+    return {
+        "checked_ok": True,
+        "found": True
+    }
 
 
 # ============================================================
@@ -985,7 +895,8 @@ def main():
 
         return
 
-    checked = 0
+    checked_ok = 0
+    errors = 0
     found = 0
 
     for index, item in enumerate(
@@ -998,23 +909,40 @@ def main():
             f"{index}/{len(items)}"
         )
 
-        checked += 1
-
         try:
 
-            if check_item(
+            result = check_item(
                 item,
                 config
-            ):
+            )
 
+            if result["checked_ok"]:
+                checked_ok += 1
+            else:
+                errors += 1
+
+            if result["found"]:
                 found += 1
 
         except Exception as e:
+
+            errors += 1
 
             print(
                 "❌ Unexpected item error: "
                 f"{e}"
             )
+
+            url = ""
+
+            if isinstance(item, dict):
+                url = item.get("url", "")
+
+            if url:
+                send_error_telegram(
+                    url,
+                    f"Unexpected error: {e}"
+                )
 
     elapsed = time.time() - start
 
@@ -1027,7 +955,11 @@ def main():
     )
 
     print(
-        f"✅ Checked: {checked}"
+        f"✅ Successfully checked: {checked_ok}"
+    )
+
+    print(
+        f"⚠️ Errors: {errors}"
     )
 
     print(
