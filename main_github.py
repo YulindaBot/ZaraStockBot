@@ -2,7 +2,6 @@ import json
 import os
 import time
 import subprocess
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urlparse, parse_qs
@@ -145,7 +144,7 @@ def send_telegram(message):
                 "parse_mode": "HTML",
                 "disable_web_page_preview": False
             },
-            timeout=10
+            timeout=15
         )
 
         response.raise_for_status()
@@ -211,46 +210,131 @@ def get_product_id_from_url(url):
 
 
 # ============================================================
-# REEF API
+# REEF API WITH RETRIES
 # ============================================================
 
 def reef_product_detail(product_id):
-
     if not REEF_KEY:
         raise RuntimeError(
             "REEF_KEY is missing"
         )
 
-    response = requests.post(
-        REEF_API_URL,
-        headers={
-            "x-api-key": REEF_KEY,
-            "content-type": "application/json"
-        },
-        json={
-            "product_id": str(product_id),
-            "market": "pl",
-            "include_composition": False,
-            "find_market": False
-        },
-        timeout=30
-    )
+    max_attempts = 3
+    retry_delay = 5
 
-    print(
-        "🌊 ReefAPI DETAIL HTTP: "
-        f"{response.status_code}"
-    )
+    last_error = None
 
-    response.raise_for_status()
+    for attempt in range(1, max_attempts + 1):
 
-    payload = response.json()
-
-    if not payload.get("ok"):
-        raise RuntimeError(
-            f"ReefAPI error: {payload.get('error')}"
+        print(
+            f"🌊 ReefAPI attempt "
+            f"{attempt}/{max_attempts}"
         )
 
-    return payload.get("data")
+        try:
+            response = requests.post(
+                REEF_API_URL,
+                headers={
+                    "x-api-key": REEF_KEY,
+                    "content-type": "application/json"
+                },
+                json={
+                    "product_id": str(product_id),
+                    "market": "pl",
+                    "include_composition": False,
+                    "find_market": False
+                },
+                timeout=30
+            )
+
+            print(
+                "🌊 ReefAPI DETAIL HTTP: "
+                f"{response.status_code}"
+            )
+
+            response.raise_for_status()
+
+            payload = response.json()
+
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    f"ReefAPI error: "
+                    f"{payload.get('error')}"
+                )
+
+            data = payload.get("data")
+
+            if not data:
+                raise RuntimeError(
+                    "ReefAPI returned no product data"
+                )
+
+            print(
+                f"✅ ReefAPI success "
+                f"on attempt {attempt}"
+            )
+
+            return data
+
+        except requests.exceptions.Timeout as e:
+
+            last_error = (
+                f"ReefAPI timeout: {e}"
+            )
+
+            print(
+                f"⚠️ Attempt {attempt} timed out"
+            )
+
+        except requests.HTTPError as e:
+
+            response = getattr(
+                e,
+                "response",
+                None
+            )
+
+            status = (
+                response.status_code
+                if response is not None
+                else "unknown"
+            )
+
+            last_error = (
+                f"ReefAPI HTTP error {status}"
+            )
+
+            print(
+                f"⚠️ Attempt {attempt} "
+                f"HTTP error: {status}"
+            )
+
+        except Exception as e:
+
+            last_error = (
+                f"ReefAPI error: {e}"
+            )
+
+            print(
+                f"⚠️ Attempt {attempt} failed: "
+                f"{e}"
+            )
+
+        if attempt < max_attempts:
+
+            print(
+                f"⏳ Waiting {retry_delay} sec "
+                "before retry..."
+            )
+
+            time.sleep(
+                retry_delay
+            )
+
+    raise RuntimeError(
+        last_error
+        or "ReefAPI failed after 3 attempts"
+    )
 
 
 # ============================================================
@@ -451,59 +535,15 @@ def check_zara(url, wanted_sizes):
             product_id
         )
 
-    except requests.HTTPError as e:
-
-        response = getattr(
-            e,
-            "response",
-            None
-        )
-
-        status = (
-            response.status_code
-            if response is not None
-            else "unknown"
-        )
-
-        print(
-            f"❌ ReefAPI HTTP error: {status}"
-        )
-
-        send_error_telegram(
-            url,
-            f"ReefAPI HTTP error {status}"
-        )
-
-        return {
-            "checked_ok": False,
-            "available": []
-        }
-
     except Exception as e:
 
         print(
-            f"❌ ReefAPI detail error: {e}"
+            f"❌ ReefAPI failed after retries: {e}"
         )
 
         send_error_telegram(
             url,
-            f"ReefAPI error: {e}"
-        )
-
-        return {
-            "checked_ok": False,
-            "available": []
-        }
-
-    if not data:
-
-        print(
-            "❌ No product data received"
-        )
-
-        send_error_telegram(
-            url,
-            "API не повернув дані товару"
+            str(e)
         )
 
         return {
